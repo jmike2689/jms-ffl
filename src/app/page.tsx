@@ -1,69 +1,1286 @@
-import Image from "next/image";
+'use client';
 
-export default function Home() {
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import {
+  Trophy, Clock, Users, Settings, Play, Pause,
+  RotateCcw, Search, Lock, Unlock, ShieldAlert, Loader2, Wifi, Trash2, Save, Download, X, Copy, ArrowRightLeft, Volume2, VolumeX, UserCheck, KeyRound, MessageSquare, Send, ShieldCheck, Edit2
+} from 'lucide-react';
+import { db } from './firebase';
+import { ref, onValue, set, push } from 'firebase/database';
+import confetti from 'canvas-confetti';
+
+const POSITION_COLORS: Record<string, { bg: string; text: string; border: string; badge: string }> = {
+  QB: { bg: 'bg-red-950/90', text: 'text-red-200', border: 'border-red-600', badge: 'bg-red-600 text-white' },
+  RB: { bg: 'bg-emerald-950/90', text: 'text-emerald-200', border: 'border-emerald-600', badge: 'bg-emerald-600 text-white' },
+  WR: { bg: 'bg-blue-950/90', text: 'text-blue-200', border: 'border-blue-600', badge: 'bg-blue-600 text-white' },
+  TE: { bg: 'bg-orange-950/90', text: 'text-orange-200', border: 'border-orange-500', badge: 'bg-orange-500 text-white' },
+  K: { bg: 'bg-amber-950/90', text: 'text-amber-200', border: 'border-amber-500', badge: 'bg-amber-500 text-white' },
+  DEF: { bg: 'bg-purple-950/90', text: 'text-purple-200', border: 'border-purple-600', badge: 'bg-purple-600 text-white' },
+};
+
+// --- COMMISSIONER SECRET PIN ---
+const COMMISSIONER_PIN = '0021';
+
+interface Player {
+  id: string;
+  name: string;
+  position: 'QB' | 'RB' | 'WR' | 'TE' | 'K' | 'DEF';
+  team: string;
+  adp: number;
+}
+
+interface DraftPick {
+  round: number;
+  pickNumber: number;
+  teamId: number;
+  player: Player | null;
+  isKeeper?: boolean;
+}
+
+interface Team {
+  id: number;
+  name: string;
+  owner: string;
+}
+
+interface ChatMessage {
+  id: string;
+  teamId: number;
+  text: string;
+  timestamp: number;
+}
+
+const generateTeams = (count: number): Team[] =>
+  Array.from({ length: count }, (_, i) => ({
+    id: i + 1,
+    name: i === 0 ? 'Big Pick Energy' : `Team ${i + 1}`,
+    owner: `Owner ${i + 1}`
+  }));
+
+const generateDefaultOrder = (teamCount: number, rounds: number): number[][] => {
+  const order: number[][] = [];
+  const base = Array.from({ length: teamCount }, (_, i) => i + 1);
+  for (let r = 0; r < rounds; r++) {
+    order.push(r % 2 === 0 ? [...base] : [...base].reverse());
+  }
+  return order;
+};
+
+const getSplitName = (fullName: string) => {
+  if (!fullName) return { firstName: '', lastName: '' };
+  const parts = fullName.trim().split(' ');
+  if (parts.length === 1) return { firstName: '', lastName: parts[0] };
+  const firstName = parts[0];
+  const lastName = parts.slice(1).join(' ');
+  return { firstName, lastName };
+};
+
+export default function FantasyDraftApp() {
+  const [isUnlocked, setIsUnlocked] = useState<boolean>(false);
+  const [targetDate] = useState<Date>(new Date('2026-09-07T12:30:00-05:00'));
+  const [timeLeft, setTimeLeft] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 });
+  const [isLoadingAPI, setIsLoadingAPI] = useState<boolean>(true);
+
+  // --- League Settings State ---
+  const [totalRounds, setTotalRounds] = useState<number>(15);
+  const [teams, setTeams] = useState<Team[]>(generateTeams(10));
+  const [teamPins, setTeamPins] = useState<Record<number, string>>({});
+
+  const [tempRounds, setTempRounds] = useState<number>(15);
+  const [tempTeams, setTempTeams] = useState<Team[]>(generateTeams(10));
+  const [customOrder, setCustomOrder] = useState<number[][]>(generateDefaultOrder(10, 15));
+  const [editingRound, setEditingRound] = useState<number>(1);
+
+  const [players, setPlayers] = useState<Player[]>([]);
+  const [picks, setPicks] = useState<DraftPick[]>([]);
+  const [currentPickIndex, setCurrentPickIndex] = useState<number>(0);
+  const prevPickIndexRef = useRef<number>(0);
+
+  const [isDraftActive, setIsDraftActive] = useState<boolean>(false);
+  const [draftMode, setDraftMode] = useState<'live' | 'mock'>('live');
+
+  // --- User Identity State ---
+  const [userTeamId, setUserTeamId] = useState<number | null>(null);
+  const [showLoginModal, setShowLoginModal] = useState<boolean>(false);
+  const [loginStep, setLoginStep] = useState<'select' | 'pin'>('select');
+  const [loginTargetTeam, setLoginTargetTeam] = useState<Team | null>(null);
+  const [loginPin, setLoginPin] = useState<string>('');
+  const [loginError, setLoginError] = useState<string>('');
+
+  // --- Authorization & Commish Controls ---
+  const [isCommissioner, setIsCommissioner] = useState<boolean>(false);
+  const [showCommishPinModal, setShowCommishPinModal] = useState<boolean>(false);
+  const [inputPin, setInputPin] = useState<string>('');
+  const [pinError, setPinError] = useState<string>('');
+  const [showCommishTools, setShowCommishTools] = useState<boolean>(false);
+
+  const [defaultPickTime, setDefaultPickTime] = useState<number>(90);
+  const [clockTime, setClockTime] = useState<number>(90);
+
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [selectedPos, setSelectedPos] = useState<string>('ALL');
+
+  // --- Roster Modal & Editing State ---
+  const [viewingTeam, setViewingTeam] = useState<Team | null>(null);
+  const [isEditingName, setIsEditingName] = useState<boolean>(false);
+  const [editNameValue, setEditNameValue] = useState<string>('');
+
+  // Upgraded Assign Modal State
+  const [assignModal, setAssignModal] = useState<{ isOpen: boolean, player: Player | null, teamId: number, pickNumber: number, isKeeper: boolean }>({
+    isOpen: false, player: null, teamId: 1, pickNumber: 1, isKeeper: false
+  });
+
+  // --- Chat State ---
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [newMessage, setNewMessage] = useState<string>('');
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
+  // --- Audio State ---
+  const [isMuted, setIsMuted] = useState<boolean>(false);
+  const isMutedRef = useRef<boolean>(false);
+
+  const toggleMute = () => {
+    setIsMuted(!isMuted);
+    isMutedRef.current = !isMuted;
+  };
+
+  const playDraftSound = () => {
+    if (isMutedRef.current) return;
+    const audio = new Audio('/draft-chime.mp3');
+    audio.play().catch(() => console.log('Waiting for user interaction'));
+  };
+
+  const triggerConfetti = () => {
+    const duration = 5 * 1000;
+    const animationEnd = Date.now() + duration;
+    const defaults = { startVelocity: 30, spread: 360, ticks: 60, zIndex: 1000 };
+    const randomInRange = (min: number, max: number) => Math.random() * (max - min) + min;
+
+    const interval = setInterval(function () {
+      const timeLeft = animationEnd - Date.now();
+      if (timeLeft <= 0) return clearInterval(interval as NodeJS.Timeout);
+      const particleCount = 50 * (timeLeft / duration);
+      confetti({ ...defaults, particleCount, origin: { x: randomInRange(0.1, 0.3), y: Math.random() - 0.2 } });
+      confetti({ ...defaults, particleCount, origin: { x: randomInRange(0.7, 0.9), y: Math.random() - 0.2 } });
+    }, 250);
+  };
+
+  // Fetch API Players
+  useEffect(() => {
+    async function fetchSleeperPlayers() {
+      try {
+        const res = await fetch('/api/players');
+        const data = await res.json();
+        setPlayers(data);
+        setIsLoadingAPI(false);
+      } catch (error) {
+        console.error('Failed to load Sleeper players:', error);
+        setIsLoadingAPI(false);
+      }
+    }
+    fetchSleeperPlayers();
+  }, []);
+
+  // Firebase Draft State Sync
+  useEffect(() => {
+    const draftRef = ref(db, 'draftState');
+    const unsubscribe = onValue(draftRef, (snapshot) => {
+      const data = snapshot.val();
+      if (data) {
+        if (data.picks) setPicks(data.picks);
+        if (data.teams) setTeams(data.teams);
+        if (data.totalRounds) setTotalRounds(data.totalRounds);
+        if (data.customOrder) setCustomOrder(data.customOrder);
+        if (data.defaultPickTime) setDefaultPickTime(data.defaultPickTime);
+        if (data.teamPins) setTeamPins(data.teamPins); else setTeamPins({});
+        if (typeof data.isDraftActive === 'boolean') setIsDraftActive(data.isDraftActive);
+
+        if (typeof data.currentPickIndex === 'number') {
+          if (data.currentPickIndex > prevPickIndexRef.current) {
+            if (data.currentPickIndex >= data.picks.length) triggerConfetti();
+            else playDraftSound();
+          }
+          prevPickIndexRef.current = data.currentPickIndex;
+          setCurrentPickIndex(data.currentPickIndex);
+        }
+      } else {
+        initializeBoard(teams, totalRounds, customOrder, defaultPickTime);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Firebase Chat Sync
+  useEffect(() => {
+    const chatRef = ref(db, 'draftChat');
+    const unsubscribe = onValue(chatRef, (snapshot) => {
+      const data = snapshot.val();
+      if (data) {
+        const msgList = Object.keys(data).map(key => ({
+          id: key,
+          ...data[key]
+        })).sort((a: ChatMessage, b: ChatMessage) => a.timestamp - b.timestamp);
+        setMessages(msgList);
+      } else {
+        setMessages([]);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Auto-scroll chat to bottom
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  // Sync editing name value when roster modal opens
+  useEffect(() => {
+    if (viewingTeam) {
+      setEditNameValue(viewingTeam.name);
+      setIsEditingName(false);
+    }
+  }, [viewingTeam]);
+
+  const initializeBoard = (activeTeams: Team[], rounds: number, orderMatrix: number[][], currentDefaultPickTime: number = 90) => {
+    const newPicks: DraftPick[] = [];
+    let overallPick = 1;
+    for (let r = 0; r < rounds; r++) {
+      const roundOrder = orderMatrix[r] || Array.from({ length: activeTeams.length }, (_, i) => i + 1);
+      roundOrder.forEach((teamId) => {
+        newPicks.push({ round: r + 1, pickNumber: overallPick++, teamId, player: null });
+      });
+    }
+    set(ref(db, 'draftState'), {
+      picks: newPicks,
+      currentPickIndex: 0,
+      isDraftActive: false,
+      teams: activeTeams,
+      totalRounds: rounds,
+      customOrder: orderMatrix,
+      defaultPickTime: currentDefaultPickTime
+    });
+  };
+
+  const updateFirebaseState = (newPicks: DraftPick[], newIndex: number, activeState: boolean) => {
+    set(ref(db, 'draftState/picks'), newPicks);
+    set(ref(db, 'draftState/currentPickIndex'), newIndex);
+    set(ref(db, 'draftState/isDraftActive'), activeState);
+  };
+
+  const getNextEmptyPick = (currentPicks: DraftPick[], startIdx: number) => {
+    let idx = startIdx;
+    while (idx < currentPicks.length && currentPicks[idx].player) {
+      idx++;
+    }
+    return idx;
+  };
+
+  const toggleDraftStatus = () => {
+    let nextIdx = currentPickIndex;
+    if (!isDraftActive) {
+      nextIdx = getNextEmptyPick(picks, currentPickIndex);
+    }
+    updateFirebaseState(picks, nextIdx, !isDraftActive);
+  };
+
+  useEffect(() => {
+    let timer: NodeJS.Timeout;
+    if (isDraftActive && clockTime > 0 && currentPickIndex < picks.length) {
+      timer = setInterval(() => setClockTime((prev) => prev - 1), 1000);
+    } else if (clockTime === 0 && isDraftActive && currentPickIndex < picks.length) {
+      handleAutoPick();
+    }
+    return () => clearInterval(timer);
+  }, [isDraftActive, clockTime, currentPickIndex, picks.length]);
+
+  useEffect(() => {
+    if (draftMode === 'mock' && isDraftActive && currentPickIndex < picks.length) {
+      const currentPick = picks[currentPickIndex];
+      if (currentPick && currentPick.teamId !== userTeamId) {
+        const timeout = setTimeout(() => handleAutoPick(), 1200);
+        return () => clearTimeout(timeout);
+      }
+    }
+  }, [currentPickIndex, isDraftActive, draftMode, userTeamId, picks]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const distance = targetDate.getTime() - new Date().getTime();
+      if (distance < 0) {
+        setIsUnlocked(true);
+        clearInterval(interval);
+      } else {
+        setTimeLeft({
+          days: Math.floor(distance / (1000 * 60 * 60 * 24)),
+          hours: Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60)),
+          minutes: Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60)),
+          seconds: Math.floor((distance % (1000 * 60)) / 1000),
+        });
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [targetDate]);
+
+  const currentPick = picks[currentPickIndex];
+  const currentPickingTeam = teams.find((t) => t.id === currentPick?.teamId);
+  const activeUserTeam = userTeamId ? teams.find((t) => t.id === userTeamId) : null;
+
+  const availablePlayers = useMemo(() => {
+    const draftedIds = new Set(picks.map((p) => p.player?.id).filter(Boolean));
+    return players
+      .filter((p) => !draftedIds.has(p.id))
+      .filter((p) => selectedPos === 'ALL' || p.position === selectedPos)
+      .filter((p) => p.name.toLowerCase().includes(searchQuery.toLowerCase()) || p.team.toLowerCase().includes(searchQuery.toLowerCase()))
+      .sort((a, b) => a.adp - b.adp);
+  }, [players, picks, selectedPos, searchQuery]);
+
+  const handleSelectPlayer = (player: Player) => {
+    if (currentPickIndex >= picks.length) return;
+    const updatedPicks = [...picks];
+    updatedPicks[currentPickIndex] = { ...updatedPicks[currentPickIndex], player };
+    const nextIndex = getNextEmptyPick(updatedPicks, currentPickIndex + 1);
+    updateFirebaseState(updatedPicks, nextIndex, isDraftActive);
+    setClockTime(defaultPickTime);
+  };
+
+  const handleAutoPick = () => { if (availablePlayers.length > 0) handleSelectPlayer(availablePlayers[0]); };
+
+  const handleUndoPick = () => {
+    if (currentPickIndex === 0) return;
+    let prevIndex = currentPickIndex - 1;
+    while (prevIndex > 0 && picks[prevIndex].isKeeper) {
+      prevIndex--;
+    }
+    const updatedPicks = [...picks];
+    updatedPicks[prevIndex] = { ...updatedPicks[prevIndex], player: null };
+    updateFirebaseState(updatedPicks, prevIndex, isDraftActive);
+    setClockTime(defaultPickTime);
+  };
+
+  const handleSaveAssignment = () => {
+    if (!assignModal.player) return;
+    const updatedPicks = [...picks];
+    const targetIndex = updatedPicks.findIndex(p => p.pickNumber === assignModal.pickNumber);
+
+    if (targetIndex !== -1) {
+      updatedPicks[targetIndex] = {
+        ...updatedPicks[targetIndex],
+        player: assignModal.player,
+        isKeeper: assignModal.isKeeper
+      };
+      set(ref(db, 'draftState/picks'), updatedPicks);
+      setAssignModal({ ...assignModal, isOpen: false });
+    }
+  };
+
+  const handleManualRemovePlayer = (pickIndex: number) => {
+    const updatedPicks = [...picks];
+    updatedPicks[pickIndex] = { ...updatedPicks[pickIndex], player: null, isKeeper: false };
+    set(ref(db, 'draftState/picks'), updatedPicks);
+  };
+
+  const handleResetDraft = () => {
+    if (window.confirm("Are you sure you want to reset the board? Keepers, team names, and custom order will be preserved.")) {
+      const resetPicks = picks.map((p) => {
+        if (p.isKeeper) return p;
+        return { ...p, player: null };
+      });
+      const startingIndex = getNextEmptyPick(resetPicks, 0);
+      updateFirebaseState(resetPicks, startingIndex, false);
+      prevPickIndexRef.current = startingIndex;
+      setClockTime(defaultPickTime);
+    }
+  };
+
+  const handleApplySettings = () => {
+    if (window.confirm("Applying new settings will reset the current draft board. Continue?")) {
+      initializeBoard(tempTeams, tempRounds, customOrder, defaultPickTime);
+      prevPickIndexRef.current = 0;
+      setClockTime(defaultPickTime);
+      setShowCommishTools(false);
+    }
+  };
+
+  // --- Manager Personal Rename Handler ---
+  const handleSaveTeamName = () => {
+    if (!editNameValue.trim() || !viewingTeam) return;
+    const updatedTeams = teams.map(t => t.id === viewingTeam.id ? { ...t, name: editNameValue.trim() } : t);
+    set(ref(db, 'draftState/teams'), updatedTeams);
+    setViewingTeam({ ...viewingTeam, name: editNameValue.trim() });
+    setIsEditingName(false);
+  };
+
+  const handleExportCSV = () => {
+    const headers = ['Overall Pick', 'Round', 'Fantasy Team', 'Player Name', 'Position', 'NFL Team', 'Keeper'];
+    const rows = picks.map(p => {
+      const teamName = teams.find(t => t.id === p.teamId)?.name || 'Unknown';
+      const playerName = p.player ? p.player.name : 'Empty';
+      const pos = p.player ? p.player.position : '';
+      const nflTeam = p.player ? p.player.team : '';
+      const keeperStatus = p.isKeeper ? 'Yes' : 'No';
+      return `"${p.pickNumber}","${p.round}","${teamName}","${playerName}","${pos}","${nflTeam}","${keeperStatus}"`;
+    });
+
+    const csvContent = [headers.join(','), ...rows].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', 'draft_results.csv');
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // --- Chat Submit Handler ---
+  const handleSendMessage = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newMessage.trim() || userTeamId === null) return;
+
+    const chatRef = ref(db, 'draftChat');
+    push(chatRef, {
+      teamId: userTeamId,
+      text: newMessage.trim(),
+      timestamp: Date.now()
+    });
+    setNewMessage('');
+  };
+
+  // --- Manager Login / Claim Flow ---
+  const handlePinSubmit = () => {
+    if (!loginTargetTeam) return;
+    const existingPin = teamPins[loginTargetTeam.id];
+
+    if (existingPin) {
+      if (loginPin === existingPin) {
+        setUserTeamId(loginTargetTeam.id);
+        closeLoginModal();
+      } else {
+        setLoginError("Incorrect PIN.");
+      }
+    } else {
+      if (loginPin.length >= 4) {
+        set(ref(db, `draftState/teamPins/${loginTargetTeam.id}`), loginPin);
+        setUserTeamId(loginTargetTeam.id);
+        closeLoginModal();
+      } else {
+        setLoginError("PIN must be at least 4 digits.");
+      }
+    }
+  };
+
+  const closeLoginModal = () => {
+    setShowLoginModal(false);
+    setLoginStep('select');
+    setLoginTargetTeam(null);
+    setLoginPin('');
+    setLoginError('');
+  };
+
+  // --- Commissioner Authorization Handler ---
+  const handleCommishAuth = () => {
+    if (inputPin === COMMISSIONER_PIN) {
+      setIsCommissioner(true);
+      setTempTeams([...teams]);
+      setTempRounds(totalRounds);
+
+      if (!isUnlocked) {
+        setIsUnlocked(true);
+        setShowCommishTools(false);
+      } else {
+        setShowCommishTools(true);
+      }
+
+      setShowCommishPinModal(false);
+      setInputPin('');
+      setPinError('');
+    } else {
+      setPinError('Invalid Commissioner Passcode');
+    }
+  };
+
+  const toggleCommishPanel = () => {
+    if (isCommissioner) {
+      if (!showCommishTools) {
+        setTempTeams([...teams]);
+        setTempRounds(totalRounds);
+      }
+      setShowCommishTools(!showCommishTools);
+    } else {
+      setShowCommishPinModal(true);
+    }
+  };
+
+  const closeCommishPinModal = () => {
+    setShowCommishPinModal(false);
+    setInputPin('');
+    setPinError('');
+  };
+
+  const updateTempTeamCount = (count: number) => {
+    if (count < 2 || count > 32) return;
+    setTempTeams(generateTeams(count));
+    setCustomOrder(generateDefaultOrder(count, tempRounds));
+    setEditingRound(1);
+  };
+
+  const handleRoundsChange = (rounds: number) => {
+    if (rounds < 1 || rounds > 40) return;
+    setTempRounds(rounds);
+
+    const newOrder = [...customOrder];
+    if (rounds > newOrder.length) {
+      for (let i = newOrder.length; i < rounds; i++) {
+        newOrder.push(i % 2 === 0 ? [...newOrder[0]] : [...newOrder[0]].reverse());
+      }
+    } else if (rounds < newOrder.length) {
+      newOrder.length = rounds;
+    }
+    setCustomOrder(newOrder);
+    if (editingRound > rounds) setEditingRound(rounds);
+  };
+
+  const updateTempTeamName = (index: number, newName: string) => {
+    const updated = [...tempTeams];
+    updated[index].name = newName;
+    setTempTeams(updated);
+  };
+
+  const updateCustomOrderSlot = (roundIdx: number, slotIdx: number, newTeamId: number) => {
+    const updated = [...customOrder];
+    updated[roundIdx][slotIdx] = newTeamId;
+    setCustomOrder(updated);
+  };
+
+  const handleCopyPrevRound = () => {
+    if (editingRound <= 1) return;
+    const updated = [...customOrder];
+    updated[editingRound - 1] = [...updated[editingRound - 2]];
+    setCustomOrder(updated);
+  };
+
+  const handleReverseCurrentRound = () => {
+    const updated = [...customOrder];
+    updated[editingRound - 1] = [...updated[editingRound - 1]].reverse();
+    setCustomOrder(updated);
+  };
+
+  // --- MODALS RENDER ---
+  const renderLoginModal = () => {
+    if (!showLoginModal) return null;
+    return (
+      <div className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden">
+          <div className="p-4 border-b border-slate-800 bg-slate-950 flex justify-between items-center">
+            <h3 className="font-black text-lg text-white flex items-center gap-2">
+              <UserCheck className="w-5 h-5 text-blue-400" />
+              {loginStep === 'select' ? 'Team Manager Login' : loginTargetTeam?.name}
+            </h3>
+            <button onClick={closeLoginModal} className="p-1 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white transition">
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          <div className="p-5 space-y-3">
+            {loginStep === 'select' ? (
+              <>
+                <p className="text-xs text-slate-400 mb-2">Select your team below. You will be prompted to create or enter your team PIN.</p>
+                <div className="grid grid-cols-1 gap-2 max-h-80 overflow-y-auto pr-1">
+                  {teams.map((t) => (
+                    <button
+                      key={t.id}
+                      onClick={() => {
+                        setLoginTargetTeam(t);
+                        setLoginStep('pin');
+                        setLoginError('');
+                      }}
+                      className={`flex items-center justify-between p-3 rounded-xl border text-left transition ${t.id === userTeamId ? 'bg-blue-600/20 border-blue-500 text-white font-bold' : 'bg-slate-950/50 border-slate-800/80 hover:bg-slate-800/50 text-slate-300'}`}
+                    >
+                      <span>{t.name}</span>
+                      <div className="flex items-center gap-2">
+                        {teamPins[t.id] ? <ShieldCheck className="w-4 h-4 text-emerald-500" /> : <span className="text-[10px] text-slate-500 uppercase font-bold">Unclaimed</span>}
+                        {t.id === userTeamId && <span className="text-xs bg-blue-600 px-2 py-0.5 rounded text-white font-bold">Active</span>}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <div className="text-center py-4">
+                <p className="text-sm font-semibold text-white mb-1">
+                  {teamPins[loginTargetTeam!.id] ? 'Enter your 4-digit PIN to login' : 'Create a 4-digit PIN to claim this team'}
+                </p>
+                <p className="text-xs text-slate-400 mb-4">
+                  {teamPins[loginTargetTeam!.id] ? 'If you forgot your PIN, ask the Commish to reset it.' : 'Remember this PIN! You will need it to switch devices.'}
+                </p>
+
+                <input
+                  type="password"
+                  pattern="\d*"
+                  placeholder="PIN"
+                  value={loginPin}
+                  onChange={(e) => setLoginPin(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handlePinSubmit()}
+                  className="w-full max-w-[200px] mx-auto bg-slate-950 border border-slate-700 text-white text-center text-xl font-mono tracking-widest py-3 rounded-xl outline-none focus:border-blue-500 mb-2 block"
+                />
+
+                {loginError && <p className="text-xs text-red-500 font-semibold mb-3">{loginError}</p>}
+
+                <div className="flex gap-2 mt-4 max-w-[250px] mx-auto">
+                  <button onClick={() => { setLoginStep('select'); setLoginError(''); setLoginPin(''); }} className="flex-1 py-2 bg-slate-800 hover:bg-slate-700 text-xs font-bold rounded-xl transition text-white">Back</button>
+                  <button onClick={handlePinSubmit} className="flex-1 py-2 bg-blue-600 hover:bg-blue-500 text-xs font-bold rounded-xl transition text-white">
+                    {teamPins[loginTargetTeam!.id] ? 'Login' : 'Claim Team'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderCommishAuthModal = () => {
+    if (!showCommishPinModal) return null;
+    return (
+      <div className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden p-6 text-center">
+          <div className="inline-flex p-3 bg-blue-600/10 border border-blue-500/20 rounded-full text-blue-400 mb-4">
+            <ShieldAlert className="w-8 h-8" />
+          </div>
+          <h3 className="font-extrabold text-lg text-white mb-1">Commissioner Access</h3>
+          <p className="text-xs text-slate-400 mb-4">Enter your passcode to unlock.</p>
+
+          <input
+            type="password"
+            placeholder="Enter Passcode"
+            value={inputPin}
+            onChange={(e) => setInputPin(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleCommishAuth()}
+            className="w-full bg-slate-950 border border-slate-700 text-white text-center text-lg font-mono tracking-widest py-2 rounded-xl outline-none focus:border-blue-500 mb-2"
+          />
+
+          {pinError && <p className="text-xs text-red-500 font-semibold mb-3">{pinError}</p>}
+
+          <div className="flex gap-2 mt-2">
+            <button onClick={closeCommishPinModal} className="flex-1 py-2 bg-slate-800 hover:bg-slate-700 text-xs font-bold rounded-xl transition text-white">Cancel</button>
+            <button onClick={handleCommishAuth} className="flex-1 py-2 bg-blue-600 hover:bg-blue-500 text-xs font-bold rounded-xl transition text-white">Unlock</button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // --- LOCK SCREEN RENDER ---
+  if (!isUnlocked) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-6 relative">
+        <div className="z-10 max-w-xl w-full bg-slate-900 border border-slate-800 rounded-2xl p-8 text-center shadow-2xl flex flex-col items-center">
+          <div className="inline-flex p-4 bg-blue-600/10 border border-blue-500/20 rounded-full text-blue-400 mb-6">
+            <Lock className="w-10 h-10" />
+          </div>
+          <h1 className="text-3xl font-bold text-white mb-2">Fantasy League Draft Room</h1>
+
+          <div className="grid grid-cols-4 gap-3 mb-8 mt-6 w-full max-w-sm">
+            {[{ l: 'Days', v: timeLeft.days }, { l: 'Hours', v: timeLeft.hours }, { l: 'Mins', v: timeLeft.minutes }, { l: 'Secs', v: timeLeft.seconds }].map((item, idx) => (
+              <div key={idx} className="bg-slate-800 border border-slate-700 rounded-xl p-3 text-center">
+                <span className="block text-3xl font-extrabold text-blue-400">{item.v}</span>
+                <span className="text-xs text-slate-400 uppercase">{item.l}</span>
+              </div>
+            ))}
+          </div>
+
+          <div className="w-full max-w-sm border-t border-slate-800 pt-6 flex flex-col gap-3">
+            <button
+              onClick={() => setShowLoginModal(true)}
+              className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition shadow-lg shadow-blue-900/20"
+            >
+              <UserCheck className="w-5 h-5" /> Team Manager Check-In
+            </button>
+            <button
+              onClick={() => setShowCommishPinModal(true)}
+              className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-xl transition text-xs"
+            >
+              <KeyRound className="w-4 h-4" /> Commissioner Override
+            </button>
+          </div>
+        </div>
+
+        {renderCommishAuthModal()}
+        {renderLoginModal()}
+      </div>
+    );
+  }
+
+  // --- MAIN APP RENDER ---
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
+      {/* Header */}
+      <header className="bg-slate-900 border-b border-slate-800 px-4 py-3 sticky top-0 z-30">
+        <div className="max-w-[1800px] mx-auto flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-blue-600 rounded-lg text-white"><Trophy className="w-6 h-6" /></div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h1 className="text-xl font-black text-white">CHAMPIONSHIP DRAFT</h1>
+                <span className="flex items-center gap-1 text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full font-bold">
+                  <Wifi className="w-3 h-3 animate-pulse" /> Live Sync
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 font-medium">{teams.length}-Team Custom Draft Board</p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-6 bg-slate-950 border border-slate-800 rounded-xl px-4 py-2">
+            <div className="flex items-center gap-2">
+              <Clock className={`w-5 h-5 ${clockTime <= 15 ? 'text-red-500 animate-pulse' : 'text-blue-400'}`} />
+              <span className={`text-2xl font-mono font-bold ${clockTime <= 15 ? 'text-red-500' : 'text-white'}`}>
+                {Math.floor(clockTime / 60)}:{(clockTime % 60).toString().padStart(2, '0')}
+              </span>
+            </div>
+            <div className="h-8 w-[1px] bg-slate-800" />
+            <div>
+              <div className="text-[10px] text-slate-400 uppercase font-bold">On The Clock</div>
+              <div className="text-sm font-bold text-blue-400">
+                {currentPick ? `Pick #${currentPick.pickNumber} (R${currentPick.round}) - ${currentPickingTeam?.name}` : 'Draft Complete!'}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+            {isCommissioner && (
+              <button
+                onClick={toggleDraftStatus}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg font-semibold text-sm transition ${isDraftActive ? 'bg-amber-600/20 text-amber-300 border border-amber-500' : 'bg-emerald-600 text-white'}`}
+              >
+                {isDraftActive ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />} {isDraftActive ? 'Pause Draft' : 'Start Draft'}
+              </button>
+            )}
+
+            {/* Team Manager Login Button */}
+            <button
+              onClick={() => setShowLoginModal(true)}
+              className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-lg border border-slate-700 text-xs transition"
             >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+              <UserCheck className={`w-4 h-4 ${activeUserTeam ? 'text-emerald-400' : 'text-slate-500'}`} />
+              <div className="text-left">
+                <div className="text-[9px] uppercase font-bold text-slate-400 leading-none">Logged in as</div>
+                <div className={`font-bold max-w-[110px] truncate ${activeUserTeam ? 'text-white' : 'text-slate-500 italic'}`}>
+                  {activeUserTeam?.name || 'Spectator Mode'}
+                </div>
+              </div>
+            </button>
+
+            {isCommissioner && (
+              <div className="bg-slate-800 p-1 rounded-lg flex gap-1 border border-slate-700">
+                <button onClick={() => setDraftMode('mock')} className={`px-3 py-1 text-xs font-bold rounded-md ${draftMode === 'mock' ? 'bg-blue-600 text-white' : 'text-slate-400'}`}>Mock</button>
+                <button onClick={() => setDraftMode('live')} className={`px-3 py-1 text-xs font-bold rounded-md ${draftMode === 'live' ? 'bg-blue-600 text-white' : 'text-slate-400'}`}>Live</button>
+              </div>
+            )}
+
+            <div className="flex items-center gap-1">
+              <button
+                onClick={toggleMute}
+                title={isMuted ? "Unmute Draft Chime" : "Mute Draft Chime"}
+                className={`p-2 rounded-lg transition ${isMuted ? 'bg-red-600/20 text-red-400 hover:bg-red-600 hover:text-white' : 'bg-slate-800 text-slate-300 hover:text-white'}`}
+              >
+                {isMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
+              </button>
+
+              {/* Commissioner Unlock / Gear Button */}
+              <button
+                onClick={toggleCommishPanel}
+                title={isCommissioner ? "Commissioner Tools" : "Unlock Commissioner Access"}
+                className={`p-2 rounded-lg transition ${isCommissioner ? (showCommishTools ? 'bg-blue-600 text-white' : 'bg-blue-900/50 text-blue-400 border border-blue-500/50') : 'bg-slate-800 text-slate-400 hover:text-white'}`}
+              >
+                {isCommissioner ? <Settings className="w-5 h-5" /> : <KeyRound className="w-5 h-5" />}
+              </button>
+            </div>
+          </div>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+      </header>
+
+      {renderCommishAuthModal()}
+      {renderLoginModal()}
+
+      {/* Manual Assignment Modal (Replaces old Keeper Modal) */}
+      {assignModal.isOpen && assignModal.player && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-amber-500/30 rounded-xl w-full max-w-sm shadow-2xl overflow-hidden">
+            <div className="bg-amber-600/20 p-4 border-b border-amber-500/30">
+              <h3 className="font-black text-amber-400 text-lg">Manual Assignment</h3>
+              <p className="text-xs text-amber-200/60 mt-1">Force assign {assignModal.player.name} to a specific pick. This will overwrite any existing player.</p>
+            </div>
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="block text-xs uppercase font-bold text-slate-500 mb-1">Target Team</label>
+                <select
+                  value={assignModal.teamId}
+                  onChange={(e) => {
+                    const newTeamId = Number(e.target.value);
+                    const firstPick = picks.find(p => p.teamId === newTeamId);
+                    setAssignModal({ ...assignModal, teamId: newTeamId, pickNumber: firstPick?.pickNumber || 1 });
+                  }}
+                  className="w-full bg-slate-950 border border-slate-700 text-white text-sm py-2 px-3 rounded-lg outline-none"
+                >
+                  {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs uppercase font-bold text-slate-500 mb-1">Target Pick</label>
+                <select
+                  value={assignModal.pickNumber}
+                  onChange={(e) => setAssignModal({ ...assignModal, pickNumber: Number(e.target.value) })}
+                  className="w-full bg-slate-950 border border-slate-700 text-white text-sm py-2 px-3 rounded-lg outline-none"
+                >
+                  {picks.filter(p => p.teamId === assignModal.teamId).map(p => (
+                    <option key={p.pickNumber} value={p.pickNumber}>
+                      Round {p.round} (Overall #{p.pickNumber}) {p.player ? `- Overwrite ${p.player.name}` : '- Empty'}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <label className="flex items-center gap-2 mt-2 cursor-pointer border-t border-slate-800 pt-4">
+                <input
+                  type="checkbox"
+                  checked={assignModal.isKeeper}
+                  onChange={(e) => setAssignModal({ ...assignModal, isKeeper: e.target.checked })}
+                  className="w-4 h-4 rounded border-slate-700 bg-slate-950 text-amber-500"
+                />
+                <span className="text-xs font-bold text-slate-300">Mark as Keeper (adds yellow 'K' badge)</span>
+              </label>
+
+            </div>
+            <div className="flex gap-2 p-4 bg-slate-950/50 border-t border-slate-800">
+              <button onClick={() => setAssignModal({ ...assignModal, isOpen: false })} className="flex-1 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-bold text-sm rounded-lg transition">Cancel</button>
+              <button onClick={handleSaveAssignment} className="flex-1 px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white font-bold text-sm rounded-lg transition">Force Assign</button>
+            </div>
+          </div>
         </div>
-      </main>
+      )}
+
+      {/* Commish Tools & Settings */}
+      {isCommissioner && showCommishTools && (
+        <div className="bg-slate-900 border-b border-blue-500/30 p-6 space-y-6 shadow-xl relative z-20">
+          <div className="max-w-[1800px] mx-auto grid grid-cols-1 lg:grid-cols-2 gap-8">
+
+            {/* Quick Actions */}
+            <div className="space-y-4">
+              <h3 className="text-sm font-bold text-blue-400 flex items-center gap-2 uppercase"><ShieldAlert className="w-4 h-4" /> Commish Actions</h3>
+              <div className="flex flex-wrap items-center gap-3">
+                <button onClick={handleResetDraft} className="flex items-center gap-1.5 px-4 py-2 bg-red-600/20 text-red-400 border border-red-500/30 hover:bg-red-600 hover:text-white rounded-lg transition text-sm font-semibold"><Trash2 className="w-4 h-4" /> Reset Draft</button>
+                <button onClick={handleUndoPick} className="flex items-center gap-1.5 px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg transition text-sm font-semibold"><RotateCcw className="w-4 h-4 text-amber-400" /> Undo Last Pick</button>
+                <button onClick={handleExportCSV} className="flex items-center gap-1.5 px-4 py-2 bg-blue-600/20 text-blue-400 border border-blue-500/30 hover:bg-blue-600 hover:text-white rounded-lg transition text-sm font-semibold"><Download className="w-4 h-4" /> Export CSV</button>
+              </div>
+
+              {/* LIVE TIMER CONTROLS */}
+              <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
+                <h4 className="text-xs font-bold text-blue-400 uppercase flex items-center gap-2 mb-3"><Clock className="w-3.5 h-3.5" /> Live Timer Controls</h4>
+                <div className="flex flex-wrap items-end gap-4">
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Default (Secs)</label>
+                    <input
+                      type="number"
+                      value={defaultPickTime}
+                      onChange={(e) => {
+                        const newTime = Number(e.target.value);
+                        setDefaultPickTime(newTime);
+                        set(ref(db, 'draftState/defaultPickTime'), newTime);
+                      }}
+                      className="w-20 bg-slate-900 border border-slate-700 px-3 py-1.5 rounded-lg text-sm text-white outline-none focus:border-blue-500"
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Adjust Current Clock</label>
+                    <div className="flex items-center gap-2">
+                      <button onClick={() => setClockTime(prev => prev + 15)} className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-xs font-bold rounded-lg transition text-slate-300">+15s</button>
+                      <button onClick={() => setClockTime(prev => Math.max(0, prev - 15))} className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-xs font-bold rounded-lg transition text-slate-300">-15s</button>
+                      <button onClick={() => setClockTime(defaultPickTime)} className="px-3 py-1.5 bg-blue-600/20 text-blue-400 hover:bg-blue-600 hover:text-white border border-blue-500/30 text-xs font-bold rounded-lg transition">Reset Current</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] uppercase font-bold text-slate-500 mb-2 mt-4">Customize Team Names & PINs</label>
+                <div className="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto pr-2">
+                  {tempTeams.map((team, idx) => (
+                    <div key={team.id} className="flex flex-col gap-1 bg-slate-950 p-2 rounded-lg border border-slate-800">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-bold text-slate-500">{idx + 1}.</span>
+                        {teamPins[team.id] ? (
+                          <button onClick={() => set(ref(db, `draftState/teamPins/${team.id}`), null)} className="text-[9px] text-red-400 hover:text-red-300 font-bold bg-red-950/50 px-1.5 py-0.5 rounded">Clear PIN</button>
+                        ) : (
+                          <span className="text-[9px] text-slate-500 font-bold">Unclaimed</span>
+                        )}
+                      </div>
+                      <input
+                        type="text"
+                        value={team.name}
+                        onChange={(e) => updateTempTeamName(idx, e.target.value)}
+                        className="w-full bg-transparent text-xs text-white outline-none"
+                      />
+                    </div>
+                  ))}
+                </div>
+                <button
+                  onClick={() => {
+                    set(ref(db, 'draftState/teams'), tempTeams);
+                    alert("Team names synced to live board!");
+                  }}
+                  className="w-full mt-3 bg-blue-600/20 text-blue-400 border border-blue-500/30 hover:bg-blue-600 hover:text-white text-xs font-bold py-2 rounded-lg transition"
+                >
+                  Quick Save Name Changes (No Reset)
+                </button>
+              </div>
+            </div>
+
+            {/* League Settings & Custom Round Editor */}
+            <div className="flex flex-col bg-slate-950 p-4 rounded-xl border border-slate-800">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-sm font-bold text-blue-400 uppercase flex items-center gap-2"><Settings className="w-4 h-4" /> Board & Order Settings</h3>
+                <button onClick={handleApplySettings} className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition">
+                  <Save className="w-3.5 h-3.5" /> Apply & Reset Board
+                </button>
+              </div>
+
+              <div className="flex items-center gap-4 mb-6">
+                <div className="flex-1">
+                  <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Number of Teams</label>
+                  <input type="number" value={tempTeams.length} onChange={(e) => updateTempTeamCount(Number(e.target.value))} min={2} max={32} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500" />
+                </div>
+                <div className="flex-1">
+                  <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Total Rounds</label>
+                  <input type="number" value={tempRounds} onChange={(e) => handleRoundsChange(Number(e.target.value))} min={1} max={30} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500" />
+                </div>
+              </div>
+
+              {/* Round-by-Round Customizer */}
+              <div className="flex-1 border-t border-slate-800 pt-4 flex flex-col">
+                <div className="flex items-center justify-between mb-3">
+                  <label className="block text-[10px] uppercase font-bold text-slate-500">Round-by-Round Editor</label>
+                  <select
+                    value={editingRound}
+                    onChange={(e) => setEditingRound(Number(e.target.value))}
+                    className="bg-slate-900 border border-slate-700 text-white text-xs py-1 px-2 rounded outline-none"
+                  >
+                    {Array.from({ length: tempRounds }).map((_, i) => (
+                      <option key={i} value={i + 1}>Edit Round {i + 1}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-2 mb-3">
+                  <button onClick={handleCopyPrevRound} disabled={editingRound === 1} className="flex-1 flex justify-center items-center gap-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-md py-1.5 text-xs text-slate-300 disabled:opacity-50 disabled:cursor-not-allowed transition">
+                    <Copy className="w-3.5 h-3.5" /> Copy Prev Round
+                  </button>
+                  <button onClick={handleReverseCurrentRound} className="flex-1 flex justify-center items-center gap-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-md py-1.5 text-xs text-slate-300 transition">
+                    <ArrowRightLeft className="w-3.5 h-3.5" /> Reverse Order
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-2 overflow-y-auto pr-1">
+                  {customOrder[editingRound - 1]?.map((teamId, slotIdx) => (
+                    <div key={slotIdx} className="flex flex-col gap-1 bg-slate-900 p-2 rounded-lg border border-slate-800">
+                      <span className="text-[9px] font-bold text-slate-500 uppercase">Pick {slotIdx + 1}</span>
+                      <select
+                        value={teamId}
+                        onChange={(e) => updateCustomOrderSlot(editingRound - 1, slotIdx, Number(e.target.value))}
+                        className="bg-slate-950 border border-slate-800 text-white text-xs py-1 px-1.5 rounded outline-none w-full"
+                      >
+                        {tempTeams.map(t => (
+                          <option key={t.id} value={t.id}>{t.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Main Board */}
+      <div className="flex-1 max-w-[1800px] w-full mx-auto p-4 grid grid-cols-1 lg:grid-cols-12 gap-4 relative">
+
+        {/* Roster Modal Overlay */}
+        {viewingTeam && (
+          <div className="absolute inset-0 z-40 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 rounded-2xl">
+            <div className="bg-slate-900 border border-slate-700 rounded-xl w-full max-w-md shadow-2xl flex flex-col max-h-[90%]">
+              <div className="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-950 rounded-t-xl">
+
+                {isEditingName ? (
+                  <div className="flex items-center gap-2 flex-1 mr-4">
+                    <Users className="w-5 h-5 text-blue-400" />
+                    <input
+                      type="text"
+                      value={editNameValue}
+                      onChange={(e) => setEditNameValue(e.target.value)}
+                      className="bg-slate-900 border border-slate-700 text-white px-2 py-1 rounded text-sm font-bold outline-none flex-1 focus:border-blue-500"
+                      autoFocus
+                      onKeyDown={(e) => e.key === 'Enter' && handleSaveTeamName()}
+                    />
+                    <button onClick={handleSaveTeamName} className="bg-emerald-600 hover:bg-emerald-500 text-white px-2 py-1 rounded text-xs font-bold transition">Save</button>
+                    <button onClick={() => setIsEditingName(false)} className="bg-slate-800 hover:bg-slate-700 text-white px-2 py-1 rounded text-xs font-bold transition">Cancel</button>
+                  </div>
+                ) : (
+                  <h3 className="font-black text-lg text-white flex items-center gap-2">
+                    <Users className="w-5 h-5 text-blue-400" /> {viewingTeam.name} Roster
+                    {(isCommissioner || userTeamId === viewingTeam.id) && (
+                      <button onClick={() => setIsEditingName(true)} className="p-1 hover:bg-slate-800 text-slate-500 hover:text-blue-400 rounded transition ml-1" title="Edit Team Name">
+                        <Edit2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </h3>
+                )}
+
+                {!isEditingName && (
+                  <button onClick={() => setViewingTeam(null)} className="p-1 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white transition">
+                    <X className="w-5 h-5" />
+                  </button>
+                )}
+              </div>
+              <div className="p-3 overflow-y-auto flex-1 space-y-1.5">
+                {picks.filter(p => p.teamId === viewingTeam.id).map(pick => (
+                  <div key={pick.pickNumber} className="flex items-center justify-between p-3 rounded-lg bg-slate-950/50 border border-slate-800/80">
+                    <div className="text-xs text-slate-500 font-bold w-10">R{pick.round}</div>
+                    {pick.player ? (
+                      <div className="flex-1 flex justify-between items-center ml-2">
+                        <span className="font-bold text-sm text-white">{pick.player.name} {pick.isKeeper && <span className="ml-1 text-[10px] bg-amber-500/20 text-amber-500 px-1 py-0.5 rounded border border-amber-500/30">KEEPER</span>}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-slate-400">{pick.player.team}</span>
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${POSITION_COLORS[pick.player.position]?.badge}`}>{pick.player.position}</span>
+                          {isCommissioner && showCommishTools && (
+                            <button onClick={() => handleManualRemovePlayer(picks.findIndex(p => p.pickNumber === pick.pickNumber))} className="p-1.5 hover:bg-red-500/20 text-red-500 rounded-md transition ml-1">
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex-1 ml-2 text-sm text-slate-600 font-semibold italic">Empty</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Left Column (25% width) - Players & Chat Container */}
+        <div className="lg:col-span-3 flex flex-col gap-4 h-[780px]">
+
+          {/* Players Panel (Top Half) */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl flex flex-col overflow-hidden flex-1">
+            <div className="p-4 border-b border-slate-800 space-y-3">
+              <div className="flex justify-between items-center">
+                <h2 className="font-bold text-sm flex items-center gap-2"><Users className="w-4 h-4 text-blue-400" /> Available Players</h2>
+                {isLoadingAPI ? <Loader2 className="w-4 h-4 text-slate-500 animate-spin" /> : <span className="text-xs text-slate-400">{availablePlayers.length} remaining</span>}
+              </div>
+              <div className="relative">
+                <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-500" />
+                <input type="text" placeholder="Search player..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-3 py-2 text-sm text-white focus:border-blue-500 outline-none" />
+              </div>
+              <div className="flex gap-1 overflow-x-auto pb-1">
+                {['ALL', 'QB', 'RB', 'WR', 'TE', 'K', 'DEF'].map((pos) => (
+                  <button key={pos} onClick={() => setSelectedPos(pos)} className={`px-3 py-1 rounded-lg text-xs font-bold ${selectedPos === pos ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400'}`}>{pos}</button>
+                ))}
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto divide-y divide-slate-800/50 p-2">
+              {availablePlayers.map((player) => (
+                <div key={player.id} className="flex items-center justify-between p-2.5 hover:bg-slate-800/50 rounded-xl group">
+                  <div className="flex items-center gap-3">
+                    <span className={`px-2 py-1 rounded-md font-bold text-xs ${POSITION_COLORS[player.position]?.badge}`}>{player.position}</span>
+                    <div>
+                      <div className="font-bold text-sm text-white">{player.name}</div>
+                      <div className="text-xs text-slate-400">{player.team}</div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {isCommissioner && showCommishTools && (
+                      <button
+                        onClick={() => {
+                          const firstPick = picks.find(p => p.teamId === (teams[0]?.id || 1));
+                          setAssignModal({ isOpen: true, player, teamId: teams[0]?.id || 1, pickNumber: firstPick?.pickNumber || 1, isKeeper: false });
+                        }}
+                        className="px-2 py-1.5 rounded-lg text-[10px] font-bold bg-amber-600/20 text-amber-500 border border-amber-500/30 hover:bg-amber-600 hover:text-white transition uppercase"
+                      >
+                        Assign
+                      </button>
+                    )}
+                    {/* Draft Button is disabled if drafting is off, OR if the user is not a commish and not logged into a team */}
+                    <button
+                      onClick={() => handleSelectPlayer(player)}
+                      disabled={!isDraftActive || (!isCommissioner && userTeamId === null)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold ${!isDraftActive || (!isCommissioner && userTeamId === null) ? 'bg-slate-800 text-slate-600' : 'bg-blue-600 text-white'}`}
+                    >
+                      Draft
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Chat Panel (Bottom Half) */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl flex flex-col overflow-hidden flex-1">
+            <div className="p-3 border-b border-slate-800 bg-slate-950 flex justify-between items-center">
+              <h2 className="font-bold text-sm flex items-center gap-2"><MessageSquare className="w-4 h-4 text-blue-400" /> Live Draft Chat</h2>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-3 space-y-3">
+              {messages.length === 0 ? (
+                <div className="flex items-center justify-center h-full text-xs text-slate-500 italic">No messages yet. Start the trash talk!</div>
+              ) : (
+                messages.map(msg => {
+                  const isMe = msg.teamId === userTeamId;
+                  const senderTeamName = teams.find(t => t.id === msg.teamId)?.name || 'Unknown Team';
+                  return (
+                    <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
+                      <span className="text-[9px] text-slate-500 mb-0.5">{senderTeamName}</span>
+                      <div className={`px-3 py-2 text-xs max-w-[85%] ${isMe ? 'bg-blue-600 text-white rounded-2xl rounded-tr-sm' : 'bg-slate-800 text-slate-200 rounded-2xl rounded-tl-sm'}`}>
+                        {msg.text}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+              <div ref={chatEndRef} />
+            </div>
+
+            <form onSubmit={handleSendMessage} className="p-2 border-t border-slate-800 bg-slate-950 flex gap-2">
+              <input
+                type="text"
+                value={newMessage}
+                onChange={(e) => setNewMessage(e.target.value)}
+                placeholder={userTeamId === null ? "Log in to chat..." : "Message the league..."}
+                disabled={userTeamId === null}
+                className="flex-1 bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-white outline-none focus:border-blue-500 disabled:opacity-50"
+              />
+              <button type="submit" disabled={!newMessage.trim() || userTeamId === null} className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white px-3 py-1.5 rounded-lg transition flex items-center justify-center">
+                <Send className="w-4 h-4" />
+              </button>
+            </form>
+          </div>
+
+        </div>
+
+        {/* Draft Grid (75% width) */}
+        <div className="lg:col-span-9 bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col h-[780px] overflow-hidden">
+          <h2 className="font-bold text-sm flex items-center gap-2 mb-3 pb-2 border-b border-slate-800"><Trophy className="w-4 h-4 text-amber-400" /> Draft Board Grid</h2>
+          <div className="flex-1 overflow-x-auto overflow-y-auto">
+            <div className="inline-block min-w-full pb-8">
+
+              {/* Header Row (Team Names - Clicky multi-line layout) */}
+              <div
+                className="grid gap-1.5 sticky top-0 bg-slate-900 z-20 pb-2 border-b border-slate-800"
+                style={{ gridTemplateColumns: `48px repeat(${teams.length}, minmax(0, 1fr))` }}
+              >
+                {/* Top-left empty cell over Round Numbers */}
+                <div className="sticky left-0 bg-slate-900 z-30 flex items-center justify-center border-r border-slate-800/50">
+                  <span className="text-[10px] font-bold text-slate-500/50">RND</span>
+                </div>
+
+                {teams.map((team) => (
+                  <button
+                    key={team.id}
+                    onClick={() => setViewingTeam(team)}
+                    className="bg-slate-950 border border-slate-800 hover:border-blue-500 hover:bg-slate-800 transition rounded-lg p-2 text-center cursor-pointer group min-h-[44px] flex items-center justify-center"
+                  >
+                    <div className="text-xs font-black text-white group-hover:text-blue-400 leading-tight uppercase line-clamp-2">{team.name}</div>
+                  </button>
+                ))}
+              </div>
+
+              {/* Draft Rounds */}
+              <div className="space-y-1.5 mt-2">
+                {Array.from({ length: totalRounds }).map((_, rIdx) => {
+                  const rNum = rIdx + 1;
+                  const roundPicks = picks.filter((p) => p.round === rNum);
+
+                  return (
+                    <div
+                      key={rNum}
+                      className="grid gap-1.5 items-stretch relative"
+                      style={{ gridTemplateColumns: `48px repeat(${teams.length}, minmax(0, 1fr))` }}
+                    >
+                      {/* Sticky Round Number Column */}
+                      <div className="sticky left-0 z-10 bg-slate-900/90 backdrop-blur-md flex items-center justify-center h-full min-h-[84px] border border-slate-800 rounded-lg shadow-[4px_0_15px_-3px_rgba(0,0,0,0.3)]">
+                        <span className="text-sm font-black text-slate-400">{rNum}</span>
+                      </div>
+
+                      {/* Team Pick Blocks */}
+                      {teams.map((team) => {
+                        const teamPicksThisRound = roundPicks.filter((p) => p.teamId === team.id);
+
+                        if (teamPicksThisRound.length === 0) {
+                          return (
+                            <div key={`empty-${team.id}-${rNum}`} className="h-full min-h-[84px] bg-slate-900/40 border border-slate-800/30 rounded-lg flex items-center justify-center">
+                            </div>
+                          );
+                        }
+
+                        return (
+                          <div key={team.id} className="flex flex-col gap-1.5 h-full">
+                            {teamPicksThisRound.map((pick) => {
+                              const isCurrent = pick.pickNumber === currentPick?.pickNumber;
+                              const posStyle = pick.player ? POSITION_COLORS[pick.player.position] : null;
+                              const split = pick.player ? getSplitName(pick.player.name) : null;
+
+                              return (
+                                <div key={pick.pickNumber} className={`h-[84px] rounded-lg p-2 flex flex-col justify-between border relative ${isCurrent ? 'border-amber-400 bg-amber-500/10 ring-2 ring-amber-400/30 animate-pulse' : pick.player ? `${posStyle?.bg} ${posStyle?.border}` : 'bg-slate-950/50 border-slate-800/80'}`}>
+                                  {pick.isKeeper && (
+                                    <div className="absolute -top-2 -right-2 bg-amber-500 text-slate-950 text-[10px] font-black w-5 h-5 flex items-center justify-center rounded-full shadow-lg">K</div>
+                                  )}
+
+                                  {/* Top Bar: Position & NFL Team / Pick # */}
+                                  <div className="flex justify-between items-center text-[10px]">
+                                    {pick.player ? (
+                                      <span className={`px-1.5 py-0.5 rounded font-bold text-[9px] ${posStyle?.badge}`}>{pick.player.position}</span>
+                                    ) : (
+                                      <span className="text-slate-500 font-medium">#{pick.pickNumber}</span>
+                                    )}
+
+                                    {pick.player && (
+                                      <span className="text-slate-400 font-bold text-[10px] uppercase">{pick.player.team}</span>
+                                    )}
+                                  </div>
+
+                                  {/* Clicky-Style Name Block: First Name stacked over BOLD Last Name */}
+                                  {pick.player && split ? (
+                                    <div className="my-auto text-center leading-none">
+                                      <div className="text-[11px] font-semibold text-slate-200 truncate tracking-tight mb-0.5">{split.firstName}</div>
+                                      <div className={`text-xs sm:text-sm font-black tracking-tight truncate uppercase leading-tight ${posStyle?.text}`}>{split.lastName}</div>
+                                    </div>
+                                  ) : (
+                                    <div className="text-xs text-slate-700 font-semibold text-center my-auto">Empty</div>
+                                  )}
+
+                                  {/* Bottom Row */}
+                                  {pick.player && (
+                                    <div className="flex justify-between text-[9px] text-slate-500 border-t border-white/10 pt-1">
+                                      <span>#{pick.pickNumber}</span>
+                                      <span>R{pick.round}</span>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
