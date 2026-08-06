@@ -639,7 +639,7 @@ export default function FantasyDraftApp() {
             <p className="mt-2">Once accepted through Yahoo, a trade cannot be withdrawn by one party due to a player injury, suspension or any other unforeseen circumstance. The only way a trade can be voided is if it is withdrawn by BOTH parties before the trade is granted. During the 24-hour trade acceptance period, all owners (except those involved in the trade) will be given the opportunity to veto the trade. However, those owners who choose to veto the trade MUST make a valid case to the Commissioner for why the trade should not be granted. Final decision will be made by the Commissioner.</p>
 
             <h4 className="font-bold text-white text-base">Article IX, Draft Day</h4>
-            <p>We will be using ClickyDraft to perform the live draft (Subject to change seasonally). Draft Day will be set by league vote with at least 3 available days to draft. You must be present, in person, to take part in the live draft. If you cannot attend the draft in person, you will forfeit your rights to the team. The Commissioner will take over the team and be responsible for finding a replacement team before draft day.</p>
+            <p>We will be using www.jmsffl.com to perform the live draft (Subject to change seasonally). You must be present, in person, to take part in the live draft. If you cannot attend the draft in person, you will forfeit your rights to the team. The Commissioner will take over the team and be responsible for finding a replacement team before draft day.</p>
             <p className="font-semibold text-white mt-2">EXCEPTIONS:</p>
             <ol className="list-decimal pl-5 space-y-1">
               <li>You live more than 2 hours away</li>
