@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Trophy, Clock, Users, Settings, Play, Pause,
-  RotateCcw, Search, Lock, Unlock, ShieldAlert, Loader2, Wifi, Trash2, Save, Download, X, Copy, ArrowRightLeft, Volume2, VolumeX, UserCheck, KeyRound, MessageSquare, Send, ShieldCheck, Edit2
+  RotateCcw, Search, Lock, Unlock, ShieldAlert, Loader2, Wifi, Trash2, Save, Download, X, Copy, ArrowRightLeft, Volume2, VolumeX, UserCheck, KeyRound, MessageSquare, Send, ShieldCheck, Edit2, BookOpen
 } from 'lucide-react';
 import { db } from './firebase';
 import { ref, onValue, set, push } from 'firebase/database';
@@ -124,6 +124,9 @@ export default function FantasyDraftApp() {
   const [viewingTeam, setViewingTeam] = useState<Team | null>(null);
   const [isEditingName, setIsEditingName] = useState<boolean>(false);
   const [editNameValue, setEditNameValue] = useState<string>('');
+
+  // --- Bylaws Modal State ---
+  const [showBylawsModal, setShowBylawsModal] = useState<boolean>(false);
 
   // Upgraded Assign Modal State
   const [assignModal, setAssignModal] = useState<{ isOpen: boolean, player: Player | null, teamId: number, pickNumber: number, isKeeper: boolean }>({
@@ -401,7 +404,6 @@ export default function FantasyDraftApp() {
     }
   };
 
-  // --- Manager Personal Rename Handler ---
   const handleSaveTeamName = () => {
     if (!editNameValue.trim() || !viewingTeam) return;
     const updatedTeams = teams.map(t => t.id === viewingTeam.id ? { ...t, name: editNameValue.trim() } : t);
@@ -432,7 +434,6 @@ export default function FantasyDraftApp() {
     document.body.removeChild(link);
   };
 
-  // --- Chat Submit Handler ---
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMessage.trim() || userTeamId === null) return;
@@ -446,7 +447,6 @@ export default function FantasyDraftApp() {
     setNewMessage('');
   };
 
-  // --- Manager Login / Claim Flow ---
   const handlePinSubmit = () => {
     if (!loginTargetTeam) return;
     const existingPin = teamPins[loginTargetTeam.id];
@@ -477,7 +477,6 @@ export default function FantasyDraftApp() {
     setLoginError('');
   };
 
-  // --- Commissioner Authorization Handler ---
   const handleCommishAuth = () => {
     if (inputPin === COMMISSIONER_PIN) {
       setIsCommissioner(true);
@@ -565,7 +564,104 @@ export default function FantasyDraftApp() {
     setCustomOrder(updated);
   };
 
-  // --- MODALS RENDER ---
+  // --- BYLAWS MODAL ---
+  const renderBylawsModal = () => {
+    if (!showBylawsModal) return null;
+    return (
+      <div className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
+          <div className="p-4 border-b border-slate-800 bg-slate-950 flex justify-between items-center">
+            <h3 className="font-black text-lg text-white flex items-center gap-2">
+              <BookOpen className="w-5 h-5 text-blue-400" /> League Bylaws & Rules
+            </h3>
+            <button onClick={() => setShowBylawsModal(false)} className="p-1 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white transition">
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+          <div className="p-6 overflow-y-auto space-y-4 text-slate-300 text-sm leading-relaxed">
+            <h4 className="font-bold text-white text-base">Article I, Agreement to the By-laws</h4>
+            <p>By providing the entry fee, it is understood that you have read the By-laws below and you are agreeing to them. It is also understood that you are aware of the roster positions, settings and scoring setup for the current league year.</p>
+
+            <h4 className="font-bold text-white text-base">Article II, League Entry</h4>
+            <p>Entry Fee: $25. Dues are required no later than 10 days before the draft date. Failure to pay by the deadline (10 days before draft day) will lead to your replacement in the league. The Commissioner will take over managing the delinquent teams and is responsible for finding a replacement team.</p>
+
+            <h4 className="font-bold text-white text-base">Article III, Prize Payout Structure</h4>
+            <p>Total prize pool is $300. The league awards cash prizes to the top 3 teams who reach the Championship Playoff Bracket. Here is how we will award the winning teams:</p>
+            <ul className="list-disc pl-5 space-y-1">
+              <li>1st: $175</li>
+              <li>2nd: $75</li>
+              <li>3rd: $50</li>
+            </ul>
+
+            <h4 className="font-bold text-white text-base">Article IV, Playoff Configuration</h4>
+            <p>Our league will implement a 6-team Championship Playoff Bracket. The top 6 teams will be determined first by win/loss record and total points will be used as a tie breaker if necessary. We will also implement a 6-team Loser Playoff Bracket. The final standings of the Loser Bracket will determine the top 6 draft positions in the following year’s fantasy draft. Playoffs are Weeks 15, 16 & 17.</p>
+
+            <h4 className="font-bold text-white text-base">Article V, Determining Draft Order</h4>
+            <p>Starting for League Year 2020-2021, the draft position for each fantasy team will be determined based on Championship/Loser playoff results from the previous year. If there is a Supplemental Draft, that order will be determined by previous year standings.</p>
+            <p className="font-semibold text-white mt-2">LOSER BRACKET RESULTS:</p>
+            <ul className="list-disc pl-5 space-y-1">
+              <li>1st Place Finish = 1st Draft Position</li>
+              <li>2nd Place Finish = 2nd Draft Position</li>
+              <li>3rd Place Finish = 3rd Draft Position</li>
+              <li>4th Place Finish = 4th Draft Position</li>
+              <li>5th Place Finish = 5th Draft Position</li>
+              <li>6th Place Finish = 6th Draft Position</li>
+            </ul>
+            <p className="font-semibold text-white mt-2">CHAMPIONSHIP BRACKET RESULTS:</p>
+            <ul className="list-disc pl-5 space-y-1">
+              <li>6th Place Finish = 7th Draft Position</li>
+              <li>5th Place Finish = 8th Draft Position</li>
+              <li>4th Place Finish = 9th Draft Position</li>
+              <li>3rd Place Finish = 10th Draft Position</li>
+              <li>2nd Place Finish = 11th Draft Position</li>
+              <li>1st Place Finish = 12th Draft Position</li>
+            </ul>
+            <p className="mt-2">Any new teams which join the league will draft in the position of the team they are taking over.</p>
+            <p className="mt-2"><strong className="text-white">Refresh/Reset years:</strong> The only time we will do a refresh/reset is every three years (2022, 2025, 2028, etc). During a reset year, the above draft order determination isn’t followed. All picks will be randomized and keepers are thrown back into the player pool until the next reset year.</p>
+
+            <h4 className="font-bold text-white text-base">Article VI, Keepers</h4>
+            <p>Starting for League Year 2020-2021, you will be allowed to keep a minimum of 1 and a maximum of 2 keepers. If you choose to keep the maximum (2) keepers, you will be beginning your draft in the 3rd round and not be entered in a supplemental draft. If you choose to keep the minimum (1) keeper, you will be beginning your draft in the 2nd round and will be entered into the supplemental draft. The supplemental draft order will be positioned based on how you finished the prior year starting with highest standing.</p>
+            <p className="mt-2">Keepers will be locked 10 days before the draft. You can choose your keeper as early or as late as you’d like before the deadline and can do so through the Yahoo! league page for your team by hovering over My Team &gt; Choose Keepers. Any keepers not selected by the deadline will be selected by the Commissioner. In the event you have a keeper get injured after the selection cutoff, but before the draft, you can choose another keeper or join the supplemental draft.</p>
+            <p className="mt-2"><strong className="text-white">Refresh/Reset years:</strong> During a reset year (2022, 2025, 2028, etc), keepers from the previous year aren’t kept. All picks will be randomized and keepers are thrown back into the player pool.</p>
+
+            <h4 className="font-bold text-white text-base">Article VII, Waiver Wire</h4>
+            <p>We are using FAAB (Free Agency Acquisition Bucks) this season. Each manager is given a budget to bid on unclaimed players that are on waivers. The budget will be $150 for the entirety of the season.</p>
+            <ul className="list-disc pl-5 space-y-1">
+              <li>Bids are blind, so other managers can't see what your bid is.</li>
+              <li>Your bid can range from $0 to the remainder of your budget.</li>
+              <li>Highest bid at the end of the waiver period wins the player.</li>
+              <li>The winning bid is removed from that manager's budget.</li>
+              <li>Ties are broken by Continual Rolling List waiver priority.</li>
+            </ul>
+
+            <h4 className="font-bold text-white text-base">Article VIII, Trade Guidelines</h4>
+            <p>For a trade to be granted in a given week, it must be accepted through Yahoo’s site no later than 24 hours before game time of all the players in the trade. This gives all owners 24 hours to review the trade before the games begin. Any trades that are submitted through the website within 24 hours of game time will be set for the next week. Players who have already played on a given week cannot be traded until the following week as well.</p>
+            <p className="mt-2">Once accepted through Yahoo, a trade cannot be withdrawn by one party due to a player injury, suspension or any other unforeseen circumstance. The only way a trade can be voided is if it is withdrawn by BOTH parties before the trade is granted. During the 24-hour trade acceptance period, all owners (except those involved in the trade) will be given the opportunity to veto the trade. However, those owners who choose to veto the trade MUST make a valid case to the Commissioner for why the trade should not be granted. Final decision will be made by the Commissioner.</p>
+
+            <h4 className="font-bold text-white text-base">Article IX, Draft Day</h4>
+            <p>We will be using ClickyDraft to perform the live draft (Subject to change seasonally). Draft Day will be set by league vote with at least 3 available days to draft. You must be present, in person, to take part in the live draft. If you cannot attend the draft in person, you will forfeit your rights to the team. The Commissioner will take over the team and be responsible for finding a replacement team before draft day.</p>
+            <p className="font-semibold text-white mt-2">EXCEPTIONS:</p>
+            <ol className="list-decimal pl-5 space-y-1">
+              <li>You live more than 2 hours away</li>
+              <li>You will be traveling during the day and advance notice was given</li>
+              <li>Acts of God</li>
+            </ol>
+
+            <h4 className="font-bold text-white text-base">Article X, Creating New League Rules</h4>
+            <p>When a league dispute arises which has not been addressed in the leagues By-laws, a discussion will ensue on possible resolutions to the dispute. Based on these discussions, the Commissioner will create a poll so that owners can vote on an appropriate course of action. The league will follow the course of action based on the league votes. Also, a new rule will be created in the By-laws based on the results of the poll so that similar disputes will be resolved in the same manner.</p>
+
+            <h4 className="font-bold text-white text-base">Article XI, Refunds, Desertion, Violations</h4>
+            <p>Refunds will not be granted if By-laws are broken or there is desertion of a team.</p>
+
+            <h4 className="font-bold text-white text-base">Article XII</h4>
+            <p>The title/role of Commissioner is non-transferable.</p>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // --- LOGIN MODAL ---
   const renderLoginModal = () => {
     if (!showLoginModal) return null;
     return (
@@ -698,6 +794,12 @@ export default function FantasyDraftApp() {
               <UserCheck className="w-5 h-5" /> Team Manager Check-In
             </button>
             <button
+              onClick={() => setShowBylawsModal(true)}
+              className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-xl transition text-xs"
+            >
+              <BookOpen className="w-4 h-4" /> View League Bylaws
+            </button>
+            <button
               onClick={() => setShowCommishPinModal(true)}
               className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-xl transition text-xs"
             >
@@ -708,6 +810,7 @@ export default function FantasyDraftApp() {
 
         {renderCommishAuthModal()}
         {renderLoginModal()}
+        {renderBylawsModal()}
       </div>
     );
   }
@@ -722,7 +825,7 @@ export default function FantasyDraftApp() {
             <div className="p-2 bg-blue-600 rounded-lg text-white"><Trophy className="w-6 h-6" /></div>
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="text-xl font-black text-white">JM's FFL - Year 14</h1>
+                <h1 className="text-xl font-black text-white">CHAMPIONSHIP DRAFT</h1>
                 <span className="flex items-center gap-1 text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full font-bold">
                   <Wifi className="w-3 h-3 animate-pulse" /> Live Sync
                 </span>
@@ -779,6 +882,15 @@ export default function FantasyDraftApp() {
             )}
 
             <div className="flex items-center gap-1">
+              {/* Bylaws Button */}
+              <button
+                onClick={() => setShowBylawsModal(true)}
+                title="View League Bylaws"
+                className="p-2 rounded-lg bg-slate-800 text-slate-300 hover:text-white transition"
+              >
+                <BookOpen className="w-5 h-5" />
+              </button>
+
               <button
                 onClick={toggleMute}
                 title={isMuted ? "Unmute Draft Chime" : "Mute Draft Chime"}
@@ -802,6 +914,7 @@ export default function FantasyDraftApp() {
 
       {renderCommishAuthModal()}
       {renderLoginModal()}
+      {renderBylawsModal()}
 
       {/* Manual Assignment Modal (Replaces old Keeper Modal) */}
       {assignModal.isOpen && assignModal.player && (
@@ -1112,7 +1225,6 @@ export default function FantasyDraftApp() {
                         Assign
                       </button>
                     )}
-                    {/* Draft Button is disabled if drafting is off, OR if the user is not a commish and not logged into a team */}
                     <button
                       onClick={() => handleSelectPlayer(player)}
                       disabled={!isDraftActive || (!isCommissioner && userTeamId === null)}
@@ -1173,12 +1285,12 @@ export default function FantasyDraftApp() {
         <div className="lg:col-span-9 bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col h-[780px] overflow-hidden">
           <h2 className="font-bold text-sm flex items-center gap-2 mb-3 pb-2 border-b border-slate-800"><Trophy className="w-4 h-4 text-amber-400" /> Draft Board Grid</h2>
           <div className="flex-1 overflow-x-auto overflow-y-auto">
-            <div className="inline-block min-w-full pb-8">
+            <div className="inline-block pb-8" style={{ minWidth: `${50 + (teams.length * 110)}px` }}>
 
               {/* Header Row (Team Names - Clicky multi-line layout) */}
               <div
                 className="grid gap-1.5 sticky top-0 bg-slate-900 z-20 pb-2 border-b border-slate-800"
-                style={{ gridTemplateColumns: `48px repeat(${teams.length}, minmax(0, 1fr))` }}
+                style={{ gridTemplateColumns: `48px repeat(${teams.length}, minmax(110px, 1fr))` }}
               >
                 {/* Top-left empty cell over Round Numbers */}
                 <div className="sticky left-0 bg-slate-900 z-30 flex items-center justify-center border-r border-slate-800/50">
@@ -1206,7 +1318,7 @@ export default function FantasyDraftApp() {
                     <div
                       key={rNum}
                       className="grid gap-1.5 items-stretch relative"
-                      style={{ gridTemplateColumns: `48px repeat(${teams.length}, minmax(0, 1fr))` }}
+                      style={{ gridTemplateColumns: `48px repeat(${teams.length}, minmax(110px, 1fr))` }}
                     >
                       {/* Sticky Round Number Column */}
                       <div className="sticky left-0 z-10 bg-slate-900/90 backdrop-blur-md flex items-center justify-center h-full min-h-[84px] border border-slate-800 rounded-lg shadow-[4px_0_15px_-3px_rgba(0,0,0,0.3)]">
