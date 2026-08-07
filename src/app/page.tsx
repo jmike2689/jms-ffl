@@ -825,7 +825,7 @@ export default function FantasyDraftApp() {
             <div className="p-2 bg-blue-600 rounded-lg text-white"><Trophy className="w-6 h-6" /></div>
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="text-xl font-black text-white">JM's FFM = Year 14</h1>
+                <h1 className="text-xl font-black text-white">JM's FFL - Year 14</h1>
                 <span className="flex items-center gap-1 text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full font-bold">
                   <Wifi className="w-3 h-3 animate-pulse" /> Live Sync
                 </span>
