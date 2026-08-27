@@ -27,6 +27,7 @@ interface Player {
   position: 'QB' | 'RB' | 'WR' | 'TE' | 'K' | 'DEF';
   team: string;
   adp: number;
+  injury_status?: string | null;
 }
 
 interface DraftPick {
@@ -1162,7 +1163,18 @@ export default function FantasyDraftApp() {
                     <div className="text-xs text-slate-500 font-bold w-10">R{pick.round}</div>
                     {pick.player ? (
                       <div className="flex-1 flex justify-between items-center ml-2">
-                        <span className="font-bold text-sm text-white">{pick.player.name} {pick.isKeeper && <span className="ml-1 text-[10px] bg-amber-500/20 text-amber-500 px-1 py-0.5 rounded border border-amber-500/30">KEEPER</span>}</span>
+                        <span className="font-bold text-sm text-white flex items-center gap-1.5">
+                          {pick.player.name}
+                          {pick.player.injury_status && (
+                            <span className={`px-1 py-[1px] rounded-[4px] text-[8px] font-black uppercase leading-none border ${['Out', 'IR', 'PUP', 'Sus', 'Suspended'].includes(pick.player.injury_status) ? 'bg-red-950/80 text-red-500 border-red-500/50' :
+                                pick.player.injury_status === 'Doubtful' ? 'bg-orange-950/80 text-orange-500 border-orange-500/50' :
+                                  'bg-amber-950/80 text-amber-500 border-amber-500/50'
+                              }`}>
+                              {pick.player.injury_status === 'Questionable' ? 'Q' : pick.player.injury_status === 'Doubtful' ? 'D' : pick.player.injury_status === 'Suspended' ? 'SUS' : pick.player.injury_status}
+                            </span>
+                          )}
+                          {pick.isKeeper && <span className="text-[10px] bg-amber-500/20 text-amber-500 px-1 py-0.5 rounded border border-amber-500/30">KEEPER</span>}
+                        </span>
                         <div className="flex items-center gap-2">
                           <span className="text-xs text-slate-400">{pick.player.team}</span>
                           <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${POSITION_COLORS[pick.player.position]?.badge}`}>{pick.player.position}</span>
@@ -1209,7 +1221,17 @@ export default function FantasyDraftApp() {
                   <div className="flex items-center gap-3">
                     <span className={`px-2 py-1 rounded-md font-bold text-xs ${POSITION_COLORS[player.position]?.badge}`}>{player.position}</span>
                     <div>
-                      <div className="font-bold text-sm text-white">{player.name}</div>
+                      <div className="font-bold text-sm text-white flex items-center gap-1.5">
+                        {player.name}
+                        {player.injury_status && (
+                          <span className={`px-1 py-[1px] rounded-[4px] text-[8px] font-black uppercase leading-none border ${['Out', 'IR', 'PUP', 'Sus', 'Suspended'].includes(player.injury_status) ? 'bg-red-950/80 text-red-500 border-red-500/50' :
+                              player.injury_status === 'Doubtful' ? 'bg-orange-950/80 text-orange-500 border-orange-500/50' :
+                                'bg-amber-950/80 text-amber-500 border-amber-500/50'
+                            }`}>
+                            {player.injury_status === 'Questionable' ? 'Q' : player.injury_status === 'Doubtful' ? 'D' : player.injury_status === 'Suspended' ? 'SUS' : player.injury_status}
+                          </span>
+                        )}
+                      </div>
                       <div className="text-xs text-slate-400">{player.team}</div>
                     </div>
                   </div>
@@ -1227,8 +1249,8 @@ export default function FantasyDraftApp() {
                     )}
                     <button
                       onClick={() => handleSelectPlayer(player)}
-                      disabled={!isDraftActive || (!isCommissioner && userTeamId === null)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold ${!isDraftActive || (!isCommissioner && userTeamId === null) ? 'bg-slate-800 text-slate-600' : 'bg-blue-600 text-white'}`}
+                      disabled={!isDraftActive || (!isCommissioner && userTeamId !== currentPick?.teamId)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold ${!isDraftActive || (!isCommissioner && userTeamId !== currentPick?.teamId) ? 'bg-slate-800 text-slate-600' : 'bg-blue-600 text-white'}`}
                     >
                       Draft
                     </button>

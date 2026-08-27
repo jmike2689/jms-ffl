@@ -20,6 +20,7 @@ export async function GET() {
                     name: isDef ? `${p.first_name} ${p.last_name}` : p.full_name || `${p.first_name} ${p.last_name}`,
                     position: p.position,
                     team: p.team || 'FA',
+                    injury_status: p.injury_status || null, // <-- Added injury status here
                     _tempRank: rank
                 };
             })
@@ -33,7 +34,8 @@ export async function GET() {
                 name: p.name,
                 position: p.position,
                 team: p.team,
-                adp: index + 1
+                adp: index + 1,
+                injury_status: p.injury_status // <-- Passed it through to the frontend
             }));
 
         return NextResponse.json(players);
