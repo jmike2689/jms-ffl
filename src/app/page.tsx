@@ -287,15 +287,19 @@ export default function FantasyDraftApp() {
     updateFirebaseState(picks, nextIdx, !isDraftActive);
   };
 
+  // --- ADVANCED TIMER LOGIC (SKIP ON ZERO) ---
   useEffect(() => {
     let timer: NodeJS.Timeout;
     if (isDraftActive && clockTime > 0 && currentPickIndex < picks.length) {
       timer = setInterval(() => setClockTime((prev) => prev - 1), 1000);
     } else if (clockTime === 0 && isDraftActive && currentPickIndex < picks.length) {
-      handleAutoPick();
+      // Timer expired! Jump to the next pick instead of auto-drafting.
+      const nextIndex = getNextEmptyPick(picks, currentPickIndex + 1);
+      updateFirebaseState(picks, nextIndex, isDraftActive);
+      setClockTime(defaultPickTime);
     }
     return () => clearInterval(timer);
-  }, [isDraftActive, clockTime, currentPickIndex, picks.length]);
+  }, [isDraftActive, clockTime, currentPickIndex, picks, defaultPickTime]);
 
   useEffect(() => {
     if (draftMode === 'mock' && isDraftActive && currentPickIndex < picks.length) {
@@ -325,9 +329,12 @@ export default function FantasyDraftApp() {
     return () => clearInterval(interval);
   }, [targetDate]);
 
+  // --- STATE VARIABLES FOR UI PERMISSIONS ---
   const currentPick = picks[currentPickIndex];
   const currentPickingTeam = teams.find((t) => t.id === currentPick?.teamId);
   const activeUserTeam = userTeamId ? teams.find((t) => t.id === userTeamId) : null;
+  const myFirstEmpty = userTeamId ? picks.findIndex(p => p.teamId === userTeamId && !p.player) : -1;
+  const isMyTurnOrSkipped = myFirstEmpty !== -1 && myFirstEmpty <= currentPickIndex;
 
   const availablePlayers = useMemo(() => {
     const draftedIds = new Set(picks.map((p) => p.player?.id).filter(Boolean));
@@ -338,13 +345,38 @@ export default function FantasyDraftApp() {
       .sort((a, b) => a.adp - b.adp);
   }, [players, picks, selectedPos, searchQuery]);
 
+  // --- REWIRED DRAFT LOGIC FOR MAKEUP PICKS ---
   const handleSelectPlayer = (player: Player) => {
-    if (currentPickIndex >= picks.length) return;
+    let targetIndex = currentPickIndex;
+
+    // Check if user is a standard manager
+    if (!isCommissioner) {
+      if (myFirstEmpty !== -1 && myFirstEmpty <= currentPickIndex) {
+        targetIndex = myFirstEmpty;
+      } else {
+        return; // Security check: Not their turn
+      }
+    } else {
+      // If commissioner is drafting while the draft is "over"
+      if (targetIndex >= picks.length) {
+        targetIndex = picks.findIndex(p => !p.player);
+      }
+    }
+
+    if (targetIndex >= picks.length || targetIndex === -1) return;
+
     const updatedPicks = [...picks];
-    updatedPicks[currentPickIndex] = { ...updatedPicks[currentPickIndex], player };
-    const nextIndex = getNextEmptyPick(updatedPicks, currentPickIndex + 1);
-    updateFirebaseState(updatedPicks, nextIndex, isDraftActive);
-    setClockTime(defaultPickTime);
+    updatedPicks[targetIndex] = { ...updatedPicks[targetIndex], player };
+
+    if (targetIndex < currentPickIndex) {
+      // It's a makeup pick! Fill the slot quietly without resetting the main clock.
+      set(ref(db, 'draftState/picks'), updatedPicks);
+    } else {
+      // It's an active pick. Advance the board!
+      const nextIndex = getNextEmptyPick(updatedPicks, currentPickIndex + 1);
+      updateFirebaseState(updatedPicks, nextIndex, isDraftActive);
+      setClockTime(defaultPickTime);
+    }
   };
 
   const handleAutoPick = () => { if (availablePlayers.length > 0) handleSelectPlayer(availablePlayers[0]); };
@@ -1249,8 +1281,8 @@ export default function FantasyDraftApp() {
                     )}
                     <button
                       onClick={() => handleSelectPlayer(player)}
-                      disabled={!isDraftActive || (!isCommissioner && userTeamId !== currentPick?.teamId)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold ${!isDraftActive || (!isCommissioner && userTeamId !== currentPick?.teamId) ? 'bg-slate-800 text-slate-600' : 'bg-blue-600 text-white'}`}
+                      disabled={!isDraftActive || (!isCommissioner && !isMyTurnOrSkipped)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold ${!isDraftActive || (!isCommissioner && !isMyTurnOrSkipped) ? 'bg-slate-800 text-slate-600' : 'bg-blue-600 text-white'}`}
                     >
                       Draft
                     </button>
@@ -1361,12 +1393,14 @@ export default function FantasyDraftApp() {
                         return (
                           <div key={team.id} className="flex flex-col gap-1.5 h-full">
                             {teamPicksThisRound.map((pick) => {
-                              const isCurrent = pick.pickNumber === currentPick?.pickNumber;
+                              const pickIndex = picks.findIndex(p => p.pickNumber === pick.pickNumber);
+                              const isCurrent = pickIndex === currentPickIndex;
+                              const isSkipped = !pick.player && pickIndex < currentPickIndex;
                               const posStyle = pick.player ? POSITION_COLORS[pick.player.position] : null;
                               const split = pick.player ? getSplitName(pick.player.name) : null;
 
                               return (
-                                <div key={pick.pickNumber} className={`h-[84px] rounded-lg p-2 flex flex-col justify-between border relative ${isCurrent ? 'border-amber-400 bg-amber-500/10 ring-2 ring-amber-400/30 animate-pulse' : pick.player ? `${posStyle?.bg} ${posStyle?.border}` : 'bg-slate-950/50 border-slate-800/80'}`}>
+                                <div key={pick.pickNumber} className={`h-[84px] rounded-lg p-2 flex flex-col justify-between border relative ${isCurrent ? 'border-amber-400 bg-amber-500/10 ring-2 ring-amber-400/30 animate-pulse' : isSkipped ? 'border-red-500/50 bg-red-950/30 ring-1 ring-red-500/50' : pick.player ? `${posStyle?.bg} ${posStyle?.border}` : 'bg-slate-950/50 border-slate-800/80'}`}>
                                   {pick.isKeeper && (
                                     <div className="absolute -top-2 -right-2 bg-amber-500 text-slate-950 text-[10px] font-black w-5 h-5 flex items-center justify-center rounded-full shadow-lg">K</div>
                                   )}
