@@ -294,7 +294,6 @@ export default function FantasyDraftApp() {
     let timer: NodeJS.Timeout;
     if (isDraftActive && clockTime > 0 && currentPickIndex < picks.length) {
       timer = setInterval(() => setClockTime((prev) => {
-        // Trigger Panic Clock Sound when hitting exactly 10 seconds
         if (prev === 11 && !isMutedRef.current) {
           if (panicAudioRef.current) {
             panicAudioRef.current.pause();
@@ -306,7 +305,6 @@ export default function FantasyDraftApp() {
         return prev - 1;
       }), 1000);
     } else if (clockTime === 0 && isDraftActive && currentPickIndex < picks.length) {
-      // Timer expired! Jump to the next pick instead of auto-drafting.
       const nextIndex = getNextEmptyPick(picks, currentPickIndex + 1);
       updateFirebaseState(picks, nextIndex, isDraftActive);
       setClockTime(defaultPickTime);
@@ -352,6 +350,20 @@ export default function FantasyDraftApp() {
     return () => clearInterval(interval);
   }, [targetDate]);
 
+  // --- HELPER TO RE-HYDRATE PLAYERS WITH LATEST MASTER DATA ---
+  const getEnrichedPlayer = (player: Player | null): Player | null => {
+    if (!player) return null;
+    const master = players.find((p) => p.id === player.id);
+    if (!master) return player;
+    return {
+      ...player,
+      bye: master.bye ?? player.bye,
+      injury_status: master.injury_status ?? player.injury_status,
+      team: master.team || player.team,
+      position: master.position || player.position
+    };
+  };
+
   // --- STATE VARIABLES FOR UI PERMISSIONS ---
   const currentPick = picks[currentPickIndex];
   const currentPickingTeam = teams.find((t) => t.id === currentPick?.teamId);
@@ -383,15 +395,13 @@ export default function FantasyDraftApp() {
   const handleSelectPlayer = (player: Player) => {
     let targetIndex = currentPickIndex;
 
-    // Check if user is a standard manager
     if (!isCommissioner) {
       if (myFirstEmpty !== -1 && myFirstEmpty <= currentPickIndex) {
         targetIndex = myFirstEmpty;
       } else {
-        return; // Security check: Not their turn
+        return;
       }
     } else {
-      // If commissioner is drafting while the draft is "over"
       if (targetIndex >= picks.length) {
         targetIndex = picks.findIndex(p => !p.player);
       }
@@ -403,10 +413,8 @@ export default function FantasyDraftApp() {
     updatedPicks[targetIndex] = { ...updatedPicks[targetIndex], player };
 
     if (targetIndex < currentPickIndex) {
-      // It's a makeup pick! Fill the slot quietly without resetting the main clock.
       set(ref(db, 'draftState/picks'), updatedPicks);
     } else {
-      // It's an active pick. Advance the board!
       const nextIndex = getNextEmptyPick(updatedPicks, currentPickIndex + 1);
       updateFirebaseState(updatedPicks, nextIndex, isDraftActive);
       setClockTime(defaultPickTime);
@@ -482,10 +490,11 @@ export default function FantasyDraftApp() {
   const handleExportCSV = () => {
     const headers = ['Overall Pick', 'Round', 'Fantasy Team', 'Player Name', 'Position', 'NFL Team', 'Keeper'];
     const rows = picks.map(p => {
+      const enriched = getEnrichedPlayer(p.player);
       const teamName = teams.find(t => t.id === p.teamId)?.name || 'Unknown';
-      const playerName = p.player ? p.player.name : 'Empty';
-      const pos = p.player ? p.player.position : '';
-      const nflTeam = p.player ? p.player.team : '';
+      const playerName = enriched ? enriched.name : 'Empty';
+      const pos = enriched ? enriched.position : '';
+      const nflTeam = enriched ? enriched.team : '';
       const keeperStatus = p.isKeeper ? 'Yes' : 'No';
       return `"${p.pickNumber}","${p.round}","${teamName}","${playerName}","${pos}","${nflTeam}","${keeperStatus}"`;
     });
@@ -820,7 +829,7 @@ export default function FantasyDraftApp() {
             value={inputPin}
             onChange={(e) => setInputPin(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleCommishAuth()}
-            className="w-full bg-slate-950 border border-slate-700 text-white text-center text-lg font-mono tracking-widest py-2 rounded-xl outline-none focus:border-blue-500 mb-2"
+            className="w-full bg-slate-950 border border-slate-700 text-white text-lg font-mono tracking-widest py-2 rounded-xl outline-none focus:border-blue-500 mb-2"
           />
 
           {pinError && <p className="text-xs text-red-500 font-semibold mb-3">{pinError}</p>}
@@ -901,7 +910,7 @@ export default function FantasyDraftApp() {
             </div>
           </div>
 
-          {/* PANIC CLOCK UI: Turns heavily red when 10 seconds or less remain */}
+          {/* PANIC CLOCK UI */}
           <div className={`flex items-center gap-6 rounded-xl px-4 py-2 border transition-all ${clockTime <= 10 && isDraftActive ? 'bg-red-950 border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.4)]' : 'bg-slate-950 border-slate-800'}`}>
             <div className="flex items-center gap-2">
               <Clock className={`w-5 h-5 ${clockTime <= 10 && isDraftActive ? 'text-red-500 animate-pulse' : 'text-blue-400'}`} />
@@ -950,7 +959,6 @@ export default function FantasyDraftApp() {
             )}
 
             <div className="flex items-center gap-1">
-              {/* Bylaws Button */}
               <button
                 onClick={() => setShowBylawsModal(true)}
                 title="View League Bylaws"
@@ -967,7 +975,6 @@ export default function FantasyDraftApp() {
                 {isMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
               </button>
 
-              {/* Commissioner Unlock / Gear Button */}
               <button
                 onClick={toggleCommishPanel}
                 title={isCommissioner ? "Commissioner Tools" : "Unlock Commissioner Access"}
@@ -1184,7 +1191,7 @@ export default function FantasyDraftApp() {
         </div>
       )}
 
-      {/* Main Board - SWAPPED TO FLEXBOX FOR FULL WIDTH */}
+      {/* Main Board */}
       <div className="flex-1 w-full max-w-[2400px] mx-auto p-4 flex flex-col lg:flex-row gap-4 relative">
 
         {/* Roster Modal Overlay */}
@@ -1225,47 +1232,50 @@ export default function FantasyDraftApp() {
                 )}
               </div>
               <div className="p-3 overflow-y-auto flex-1 space-y-1.5">
-                {picks.filter(p => p.teamId === viewingTeam.id).map(pick => (
-                  <div key={pick.pickNumber} className="flex items-center justify-between p-3 rounded-lg bg-slate-950/50 border border-slate-800/80">
-                    <div className="text-xs text-slate-500 font-bold w-10">R{pick.round}</div>
-                    {pick.player ? (
-                      <div className="flex-1 flex justify-between items-center ml-2">
-                        <span className="font-bold text-sm text-white flex items-center gap-1.5">
-                          {pick.player.name}
-                          {pick.player.injury_status && (
-                            <span className={`px-1 py-[1px] rounded-[4px] text-[8px] font-black uppercase leading-none border ${['Out', 'IR', 'PUP', 'Sus', 'Suspended'].includes(pick.player.injury_status) ? 'bg-red-950/80 text-red-500 border-red-500/50' :
-                                pick.player.injury_status === 'Doubtful' ? 'bg-orange-950/80 text-orange-500 border-orange-500/50' :
-                                  'bg-amber-950/80 text-amber-500 border-amber-500/50'
-                              }`}>
-                              {pick.player.injury_status === 'Questionable' ? 'Q' : pick.player.injury_status === 'Doubtful' ? 'D' : pick.player.injury_status === 'Suspended' ? 'SUS' : pick.player.injury_status}
-                            </span>
-                          )}
-                          {pick.isKeeper && <span className="text-[10px] bg-amber-500/20 text-amber-500 px-1 py-0.5 rounded border border-amber-500/30">KEEPER</span>}
-                        </span>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs text-slate-400 font-bold uppercase flex items-center gap-1">
-                            {pick.player.team}
-                            {pick.player.bye && <span className="text-[8px] bg-slate-800/80 px-1 py-[1px] rounded">B{pick.player.bye}</span>}
+                {picks.filter(p => p.teamId === viewingTeam.id).map(pick => {
+                  const enriched = getEnrichedPlayer(pick.player);
+                  return (
+                    <div key={pick.pickNumber} className="flex items-center justify-between p-3 rounded-lg bg-slate-950/50 border border-slate-800/80">
+                      <div className="text-xs text-slate-500 font-bold w-10">R{pick.round}</div>
+                      {enriched ? (
+                        <div className="flex-1 flex justify-between items-center ml-2">
+                          <span className="font-bold text-sm text-white flex items-center gap-1.5">
+                            {enriched.name}
+                            {enriched.injury_status && (
+                              <span className={`px-1 py-[1px] rounded-[4px] text-[8px] font-black uppercase leading-none border ${['Out', 'IR', 'PUP', 'Sus', 'Suspended'].includes(enriched.injury_status) ? 'bg-red-950/80 text-red-500 border-red-500/50' :
+                                  enriched.injury_status === 'Doubtful' ? 'bg-orange-950/80 text-orange-500 border-orange-500/50' :
+                                    'bg-amber-950/80 text-amber-500 border-amber-500/50'
+                                }`}>
+                                {enriched.injury_status === 'Questionable' ? 'Q' : enriched.injury_status === 'Doubtful' ? 'D' : enriched.injury_status === 'Suspended' ? 'SUS' : enriched.injury_status}
+                              </span>
+                            )}
+                            {pick.isKeeper && <span className="text-[10px] bg-amber-500/20 text-amber-500 px-1 py-0.5 rounded border border-amber-500/30">KEEPER</span>}
                           </span>
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${POSITION_COLORS[pick.player.position]?.badge}`}>{pick.player.position}</span>
-                          {isCommissioner && showCommishTools && (
-                            <button onClick={() => handleManualRemovePlayer(picks.findIndex(p => p.pickNumber === pick.pickNumber))} className="p-1.5 hover:bg-red-500/20 text-red-500 rounded-md transition ml-1">
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          )}
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-slate-400 font-bold uppercase flex items-center gap-1">
+                              {enriched.team}
+                              {enriched.bye && <span className="text-[8px] bg-slate-800/80 px-1 py-[1px] rounded">BYE {enriched.bye}</span>}
+                            </span>
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${POSITION_COLORS[enriched.position]?.badge}`}>{enriched.position}</span>
+                            {isCommissioner && showCommishTools && (
+                              <button onClick={() => handleManualRemovePlayer(picks.findIndex(p => p.pickNumber === pick.pickNumber))} className="p-1.5 hover:bg-red-500/20 text-red-500 rounded-md transition ml-1">
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    ) : (
-                      <div className="flex-1 ml-2 text-sm text-slate-600 font-semibold italic">Empty</div>
-                    )}
-                  </div>
-                ))}
+                      ) : (
+                        <div className="flex-1 ml-2 text-sm text-slate-600 font-semibold italic">Empty</div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>
         )}
 
-        {/* Sidebar (Players & Chat) - Now Fixed Width instead of 25% */}
+        {/* Sidebar (Players & Chat) */}
         <div className="w-full lg:w-[340px] xl:w-[380px] flex-shrink-0 flex flex-col gap-4 h-[780px]">
 
           {/* Players Panel (Top Half) */}
@@ -1395,7 +1405,7 @@ export default function FantasyDraftApp() {
 
         </div>
 
-        {/* Draft Grid - Flex-1 takes remaining monitor space */}
+        {/* Draft Grid */}
         <div className="flex-1 min-w-0 bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col h-[780px] overflow-hidden">
           <h2 className="font-bold text-sm flex items-center gap-2 mb-3 pb-2 border-b border-slate-800"><Trophy className="w-4 h-4 text-amber-400" /> Draft Board Grid</h2>
           <div className="flex-1 overflow-x-auto overflow-y-auto">
@@ -1406,7 +1416,6 @@ export default function FantasyDraftApp() {
                 className="grid gap-1.5 sticky top-0 bg-slate-900 z-20 pb-2 border-b border-slate-800"
                 style={{ gridTemplateColumns: `48px repeat(${teams.length}, minmax(90px, 1fr))` }}
               >
-                {/* Top-left empty cell over Round Numbers */}
                 <div className="sticky left-0 bg-slate-900 z-30 flex items-center justify-center border-r border-slate-800/50">
                   <span className="text-[10px] font-bold text-slate-500/50">RND</span>
                 </div>
@@ -1456,33 +1465,35 @@ export default function FantasyDraftApp() {
                               const pickIndex = picks.findIndex(p => p.pickNumber === pick.pickNumber);
                               const isCurrent = pickIndex === currentPickIndex;
                               const isSkipped = !pick.player && pickIndex < currentPickIndex;
-                              const posStyle = pick.player ? POSITION_COLORS[pick.player.position] : null;
-                              const split = pick.player ? getSplitName(pick.player.name) : null;
+
+                              // ENRICH WITH MASTER DATA SO KEEPERS SHOW BYE/INJURY
+                              const enriched = getEnrichedPlayer(pick.player);
+                              const posStyle = enriched ? POSITION_COLORS[enriched.position] : null;
+                              const split = enriched ? getSplitName(enriched.name) : null;
 
                               return (
-                                <div key={pick.pickNumber} className={`h-[84px] rounded-lg p-2 flex flex-col justify-between border relative ${isCurrent ? 'border-amber-400 bg-amber-500/10 ring-2 ring-amber-400/30 animate-pulse' : isSkipped ? 'border-red-500/50 bg-red-950/30 ring-1 ring-red-500/50' : pick.player ? `${posStyle?.bg} ${posStyle?.border}` : 'bg-slate-950/50 border-slate-800/80'}`}>
+                                <div key={pick.pickNumber} className={`h-[84px] rounded-lg p-2 flex flex-col justify-between border relative ${isCurrent ? 'border-amber-400 bg-amber-500/10 ring-2 ring-amber-400/30 animate-pulse' : isSkipped ? 'border-red-500/50 bg-red-950/30 ring-1 ring-red-500/50' : enriched ? `${posStyle?.bg} ${posStyle?.border}` : 'bg-slate-950/50 border-slate-800/80'}`}>
                                   {pick.isKeeper && (
                                     <div className="absolute -top-2 -right-2 bg-amber-500 text-slate-950 text-[10px] font-black w-5 h-5 flex items-center justify-center rounded-full shadow-lg">K</div>
                                   )}
 
                                   {/* Top Bar: Position & NFL Team / Pick # */}
                                   <div className="flex justify-between items-center text-[10px]">
-                                    {pick.player ? (
-                                      <span className={`px-1.5 py-0.5 rounded font-bold text-[9px] ${posStyle?.badge}`}>{pick.player.position}</span>
+                                    {enriched ? (
+                                      <span className={`px-1.5 py-0.5 rounded font-bold text-[9px] ${posStyle?.badge}`}>{enriched.position}</span>
                                     ) : (
                                       <span className="text-slate-500 font-medium">#{pick.pickNumber}</span>
                                     )}
 
-                                    {pick.player && (
-                                      <span className="text-slate-400 font-bold text-[10px] uppercase flex items-center gap-1">
-                                        {pick.player.team}
-                                        {pick.player.bye && <span className="text-[8px] bg-slate-800/80 px-1 py-[1px] rounded">B{pick.player.bye}</span>}
+                                    {enriched && (
+                                      <span className="text-white/70 font-bold text-[10px] uppercase">
+                                        {enriched.team}
                                       </span>
                                     )}
                                   </div>
 
-                                  {/* Clicky-Style Name Block: First Name stacked over BOLD Last Name */}
-                                  {pick.player && split ? (
+                                  {/* First Name stacked over BOLD Last Name */}
+                                  {enriched && split ? (
                                     <div className="my-auto text-center leading-none">
                                       <div className="text-[11px] font-semibold text-slate-200 truncate tracking-tight mb-0.5">{split.firstName}</div>
                                       <div className={`text-xs sm:text-sm font-black tracking-tight truncate uppercase leading-tight ${posStyle?.text}`}>{split.lastName}</div>
@@ -1491,10 +1502,15 @@ export default function FantasyDraftApp() {
                                     <div className="text-xs text-slate-700 font-semibold text-center my-auto">Empty</div>
                                   )}
 
-                                  {/* Bottom Row */}
-                                  {pick.player && (
-                                    <div className="flex justify-between text-[9px] text-slate-500 border-t border-white/10 pt-1">
+                                  {/* Bottom Row - PROMINENT BYE WEEK */}
+                                  {enriched && (
+                                    <div className="flex justify-between items-center text-[9px] text-white/60 font-medium border-t border-white/10 pt-1">
                                       <span>#{pick.pickNumber}</span>
+                                      {enriched.bye && (
+                                        <span className="text-white font-black bg-black/40 border border-white/10 px-1.5 py-[1px] rounded text-[8px] leading-none">
+                                          BYE {enriched.bye}
+                                        </span>
+                                      )}
                                       <span>R{pick.round}</span>
                                     </div>
                                   )}
