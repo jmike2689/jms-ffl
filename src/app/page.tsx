@@ -829,7 +829,7 @@ export default function FantasyDraftApp() {
             value={inputPin}
             onChange={(e) => setInputPin(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleCommishAuth()}
-            className="w-full bg-slate-950 border border-slate-700 text-white text-lg font-mono tracking-widest py-2 rounded-xl outline-none focus:border-blue-500 mb-2"
+            className="w-full bg-slate-950 border border-slate-700 text-white text-center text-lg font-mono tracking-widest py-2 rounded-xl outline-none focus:border-blue-500 mb-2"
           />
 
           {pinError && <p className="text-xs text-red-500 font-semibold mb-3">{pinError}</p>}
@@ -1191,7 +1191,7 @@ export default function FantasyDraftApp() {
         </div>
       )}
 
-      {/* Main Board */}
+      {/* Main Board - SWAPPED TO FLEXBOX FOR FULL WIDTH */}
       <div className="flex-1 w-full max-w-[2400px] mx-auto p-4 flex flex-col lg:flex-row gap-4 relative">
 
         {/* Roster Modal Overlay */}
@@ -1275,8 +1275,8 @@ export default function FantasyDraftApp() {
           </div>
         )}
 
-        {/* Sidebar (Players & Chat) */}
-        <div className="w-full lg:w-[340px] xl:w-[380px] flex-shrink-0 flex flex-col gap-4 h-[780px]">
+        {/* Sidebar (Players & Chat) - Now Fixed Width instead of 25% */}
+        <div className="w-full lg:w-[340px] xl:w-[380px] flex-shrink-0 flex flex-col gap-4 h-[780px] lg:h-[calc(100vh-110px)]">
 
           {/* Players Panel (Top Half) */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl flex flex-col overflow-hidden flex-1">
@@ -1405,8 +1405,8 @@ export default function FantasyDraftApp() {
 
         </div>
 
-        {/* Draft Grid */}
-        <div className="flex-1 min-w-0 bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col h-[780px] overflow-hidden">
+        {/* Draft Grid - Flex-1 takes remaining monitor space */}
+        <div className="flex-1 min-w-0 bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col h-[780px] lg:h-[calc(100vh-110px)] overflow-hidden">
           <h2 className="font-bold text-sm flex items-center gap-2 mb-3 pb-2 border-b border-slate-800"><Trophy className="w-4 h-4 text-amber-400" /> Draft Board Grid</h2>
           <div className="flex-1 overflow-x-auto overflow-y-auto">
             <div className="inline-block pb-8 w-full" style={{ minWidth: `${50 + (teams.length * 90)}px` }}>
