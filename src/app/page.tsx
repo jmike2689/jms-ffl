@@ -143,7 +143,7 @@ export default function FantasyDraftApp() {
   // --- Audio State ---
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const isMutedRef = useRef<boolean>(false);
-  const panicAudioRef = useRef<HTMLAudioElement | null>(null); // Remote control for panic sound
+  const panicAudioRef = useRef<HTMLAudioElement | null>(null);
 
   const toggleMute = () => {
     setIsMuted(!isMuted);
@@ -884,10 +884,10 @@ export default function FantasyDraftApp() {
 
   // --- MAIN APP RENDER ---
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col overflow-x-hidden">
       {/* Header */}
       <header className="bg-slate-900 border-b border-slate-800 px-4 py-3 sticky top-0 z-30">
-        <div className="max-w-[1800px] mx-auto flex flex-wrap items-center justify-between gap-4">
+        <div className="w-full max-w-[2400px] mx-auto flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-blue-600 rounded-lg text-white"><Trophy className="w-6 h-6" /></div>
             <div>
@@ -984,7 +984,7 @@ export default function FantasyDraftApp() {
       {renderLoginModal()}
       {renderBylawsModal()}
 
-      {/* Manual Assignment Modal (Replaces old Keeper Modal) */}
+      {/* Manual Assignment Modal */}
       {assignModal.isOpen && assignModal.player && (
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-amber-500/30 rounded-xl w-full max-w-sm shadow-2xl overflow-hidden">
@@ -1044,7 +1044,7 @@ export default function FantasyDraftApp() {
       {/* Commish Tools & Settings */}
       {isCommissioner && showCommishTools && (
         <div className="bg-slate-900 border-b border-blue-500/30 p-6 space-y-6 shadow-xl relative z-20">
-          <div className="max-w-[1800px] mx-auto grid grid-cols-1 lg:grid-cols-2 gap-8">
+          <div className="w-full max-w-[2400px] mx-auto grid grid-cols-1 lg:grid-cols-2 gap-8">
 
             {/* Quick Actions */}
             <div className="space-y-4">
@@ -1184,8 +1184,8 @@ export default function FantasyDraftApp() {
         </div>
       )}
 
-      {/* Main Board */}
-      <div className="flex-1 max-w-[1800px] w-full mx-auto p-4 grid grid-cols-1 lg:grid-cols-12 gap-4 relative">
+      {/* Main Board - SWAPPED TO FLEXBOX FOR FULL WIDTH */}
+      <div className="flex-1 w-full max-w-[2400px] mx-auto p-4 flex flex-col lg:flex-row gap-4 relative">
 
         {/* Roster Modal Overlay */}
         {viewingTeam && (
@@ -1265,8 +1265,8 @@ export default function FantasyDraftApp() {
           </div>
         )}
 
-        {/* Left Column (25% width) - Players & Chat Container */}
-        <div className="lg:col-span-3 flex flex-col gap-4 h-[780px]">
+        {/* Sidebar (Players & Chat) - Now Fixed Width instead of 25% */}
+        <div className="w-full lg:w-[340px] xl:w-[380px] flex-shrink-0 flex flex-col gap-4 h-[780px]">
 
           {/* Players Panel (Top Half) */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl flex flex-col overflow-hidden flex-1">
@@ -1395,16 +1395,16 @@ export default function FantasyDraftApp() {
 
         </div>
 
-        {/* Draft Grid (75% width) */}
-        <div className="lg:col-span-9 bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col h-[780px] overflow-hidden">
+        {/* Draft Grid - Flex-1 takes remaining monitor space */}
+        <div className="flex-1 min-w-0 bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col h-[780px] overflow-hidden">
           <h2 className="font-bold text-sm flex items-center gap-2 mb-3 pb-2 border-b border-slate-800"><Trophy className="w-4 h-4 text-amber-400" /> Draft Board Grid</h2>
           <div className="flex-1 overflow-x-auto overflow-y-auto">
-            <div className="inline-block pb-8" style={{ minWidth: `${50 + (teams.length * 110)}px` }}>
+            <div className="inline-block pb-8 w-full" style={{ minWidth: `${50 + (teams.length * 90)}px` }}>
 
-              {/* Header Row (Team Names - Clicky multi-line layout) */}
+              {/* Header Row */}
               <div
                 className="grid gap-1.5 sticky top-0 bg-slate-900 z-20 pb-2 border-b border-slate-800"
-                style={{ gridTemplateColumns: `48px repeat(${teams.length}, minmax(110px, 1fr))` }}
+                style={{ gridTemplateColumns: `48px repeat(${teams.length}, minmax(90px, 1fr))` }}
               >
                 {/* Top-left empty cell over Round Numbers */}
                 <div className="sticky left-0 bg-slate-900 z-30 flex items-center justify-center border-r border-slate-800/50">
@@ -1432,7 +1432,7 @@ export default function FantasyDraftApp() {
                     <div
                       key={rNum}
                       className="grid gap-1.5 items-stretch relative"
-                      style={{ gridTemplateColumns: `48px repeat(${teams.length}, minmax(110px, 1fr))` }}
+                      style={{ gridTemplateColumns: `48px repeat(${teams.length}, minmax(90px, 1fr))` }}
                     >
                       {/* Sticky Round Number Column */}
                       <div className="sticky left-0 z-10 bg-slate-900/90 backdrop-blur-md flex items-center justify-center h-full min-h-[84px] border border-slate-800 rounded-lg shadow-[4px_0_15px_-3px_rgba(0,0,0,0.3)]">
