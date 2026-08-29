@@ -28,6 +28,7 @@ interface Player {
   team: string;
   adp: number;
   injury_status?: string | null;
+  bye?: number | null;
 }
 
 interface DraftPick {
@@ -142,6 +143,7 @@ export default function FantasyDraftApp() {
   // --- Audio State ---
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const isMutedRef = useRef<boolean>(false);
+  const panicAudioRef = useRef<HTMLAudioElement | null>(null); // Remote control for panic sound
 
   const toggleMute = () => {
     setIsMuted(!isMuted);
@@ -287,11 +289,22 @@ export default function FantasyDraftApp() {
     updateFirebaseState(picks, nextIdx, !isDraftActive);
   };
 
-  // --- ADVANCED TIMER LOGIC (SKIP ON ZERO) ---
+  // --- ADVANCED TIMER LOGIC (SKIP ON ZERO + PANIC TICK) ---
   useEffect(() => {
     let timer: NodeJS.Timeout;
     if (isDraftActive && clockTime > 0 && currentPickIndex < picks.length) {
-      timer = setInterval(() => setClockTime((prev) => prev - 1), 1000);
+      timer = setInterval(() => setClockTime((prev) => {
+        // Trigger Panic Clock Sound when hitting exactly 10 seconds
+        if (prev === 11 && !isMutedRef.current) {
+          if (panicAudioRef.current) {
+            panicAudioRef.current.pause();
+            panicAudioRef.current.currentTime = 0;
+          }
+          panicAudioRef.current = new Audio('/tick.mp3');
+          panicAudioRef.current.play().catch(() => { });
+        }
+        return prev - 1;
+      }), 1000);
     } else if (clockTime === 0 && isDraftActive && currentPickIndex < picks.length) {
       // Timer expired! Jump to the next pick instead of auto-drafting.
       const nextIndex = getNextEmptyPick(picks, currentPickIndex + 1);
@@ -300,6 +313,16 @@ export default function FantasyDraftApp() {
     }
     return () => clearInterval(timer);
   }, [isDraftActive, clockTime, currentPickIndex, picks, defaultPickTime]);
+
+  // --- STOP PANIC AUDIO ON PICK / RESET / PAUSE ---
+  useEffect(() => {
+    if (clockTime > 10 || !isDraftActive) {
+      if (panicAudioRef.current) {
+        panicAudioRef.current.pause();
+        panicAudioRef.current.currentTime = 0;
+      }
+    }
+  }, [clockTime, isDraftActive]);
 
   useEffect(() => {
     if (draftMode === 'mock' && isDraftActive && currentPickIndex < picks.length) {
@@ -335,6 +358,17 @@ export default function FantasyDraftApp() {
   const activeUserTeam = userTeamId ? teams.find((t) => t.id === userTeamId) : null;
   const myFirstEmpty = userTeamId ? picks.findIndex(p => p.teamId === userTeamId && !p.player) : -1;
   const isMyTurnOrSkipped = myFirstEmpty !== -1 && myFirstEmpty <= currentPickIndex;
+
+  // --- RECENT PICKS TRACKER (SCARCITY) ---
+  const recentPositions = useMemo(() => {
+    const drafted = picks.filter(p => p.player).sort((a, b) => b.pickNumber - a.pickNumber).slice(0, 10);
+    return drafted.reduce((acc, pick) => {
+      if (pick.player) {
+        acc[pick.player.position] = (acc[pick.player.position] || 0) + 1;
+      }
+      return acc;
+    }, {} as Record<string, number>);
+  }, [picks]);
 
   const availablePlayers = useMemo(() => {
     const draftedIds = new Set(picks.map((p) => p.player?.id).filter(Boolean));
@@ -867,17 +901,18 @@ export default function FantasyDraftApp() {
             </div>
           </div>
 
-          <div className="flex items-center gap-6 bg-slate-950 border border-slate-800 rounded-xl px-4 py-2">
+          {/* PANIC CLOCK UI: Turns heavily red when 10 seconds or less remain */}
+          <div className={`flex items-center gap-6 rounded-xl px-4 py-2 border transition-all ${clockTime <= 10 && isDraftActive ? 'bg-red-950 border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.4)]' : 'bg-slate-950 border-slate-800'}`}>
             <div className="flex items-center gap-2">
-              <Clock className={`w-5 h-5 ${clockTime <= 15 ? 'text-red-500 animate-pulse' : 'text-blue-400'}`} />
-              <span className={`text-2xl font-mono font-bold ${clockTime <= 15 ? 'text-red-500' : 'text-white'}`}>
+              <Clock className={`w-5 h-5 ${clockTime <= 10 && isDraftActive ? 'text-red-500 animate-pulse' : 'text-blue-400'}`} />
+              <span className={`text-2xl font-mono font-bold ${clockTime <= 10 && isDraftActive ? 'text-red-500' : 'text-white'}`}>
                 {Math.floor(clockTime / 60)}:{(clockTime % 60).toString().padStart(2, '0')}
               </span>
             </div>
-            <div className="h-8 w-[1px] bg-slate-800" />
+            <div className={`h-8 w-[1px] ${clockTime <= 10 && isDraftActive ? 'bg-red-500/30' : 'bg-slate-800'}`} />
             <div>
               <div className="text-[10px] text-slate-400 uppercase font-bold">On The Clock</div>
-              <div className="text-sm font-bold text-blue-400">
+              <div className={`text-sm font-bold ${clockTime <= 10 && isDraftActive ? 'text-red-400' : 'text-blue-400'}`}>
                 {currentPick ? `Pick #${currentPick.pickNumber} (R${currentPick.round}) - ${currentPickingTeam?.name}` : 'Draft Complete!'}
               </div>
             </div>
@@ -1208,7 +1243,10 @@ export default function FantasyDraftApp() {
                           {pick.isKeeper && <span className="text-[10px] bg-amber-500/20 text-amber-500 px-1 py-0.5 rounded border border-amber-500/30">KEEPER</span>}
                         </span>
                         <div className="flex items-center gap-2">
-                          <span className="text-xs text-slate-400">{pick.player.team}</span>
+                          <span className="text-xs text-slate-400 font-bold uppercase flex items-center gap-1">
+                            {pick.player.team}
+                            {pick.player.bye && <span className="text-[8px] bg-slate-800/80 px-1 py-[1px] rounded">B{pick.player.bye}</span>}
+                          </span>
                           <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${POSITION_COLORS[pick.player.position]?.badge}`}>{pick.player.position}</span>
                           {isCommissioner && showCommishTools && (
                             <button onClick={() => handleManualRemovePlayer(picks.findIndex(p => p.pickNumber === pick.pickNumber))} className="p-1.5 hover:bg-red-500/20 text-red-500 rounded-md transition ml-1">
@@ -1241,6 +1279,25 @@ export default function FantasyDraftApp() {
                 <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-500" />
                 <input type="text" placeholder="Search player..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-3 py-2 text-sm text-white focus:border-blue-500 outline-none" />
               </div>
+
+              {/* POSITION RUN TRACKER */}
+              <div className="flex items-center gap-2 bg-slate-950 px-3 py-2 rounded-xl border border-slate-800 overflow-x-auto">
+                <span className="text-[9px] uppercase font-black text-slate-500 whitespace-nowrap">Last 10 Picks:</span>
+                {Object.keys(recentPositions).length === 0 ? (
+                  <span className="text-[10px] text-slate-600 font-bold italic">No picks yet</span>
+                ) : (
+                  ['QB', 'RB', 'WR', 'TE', 'K', 'DEF'].map(pos => {
+                    const count = recentPositions[pos];
+                    if (!count) return null;
+                    return (
+                      <span key={pos} className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${count >= 3 ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-slate-800 text-slate-300'}`}>
+                        {count} {pos}
+                      </span>
+                    )
+                  })
+                )}
+              </div>
+
               <div className="flex gap-1 overflow-x-auto pb-1">
                 {['ALL', 'QB', 'RB', 'WR', 'TE', 'K', 'DEF'].map((pos) => (
                   <button key={pos} onClick={() => setSelectedPos(pos)} className={`px-3 py-1 rounded-lg text-xs font-bold ${selectedPos === pos ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400'}`}>{pos}</button>
@@ -1264,7 +1321,10 @@ export default function FantasyDraftApp() {
                           </span>
                         )}
                       </div>
-                      <div className="text-xs text-slate-400">{player.team}</div>
+                      <div className="text-xs text-slate-400 font-bold uppercase flex items-center gap-1.5 mt-0.5">
+                        {player.team}
+                        {player.bye && <span className="text-[8px] bg-slate-800/80 px-1 py-[1px] rounded">BYE {player.bye}</span>}
+                      </div>
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
@@ -1414,7 +1474,10 @@ export default function FantasyDraftApp() {
                                     )}
 
                                     {pick.player && (
-                                      <span className="text-slate-400 font-bold text-[10px] uppercase">{pick.player.team}</span>
+                                      <span className="text-slate-400 font-bold text-[10px] uppercase flex items-center gap-1">
+                                        {pick.player.team}
+                                        {pick.player.bye && <span className="text-[8px] bg-slate-800/80 px-1 py-[1px] rounded">B{pick.player.bye}</span>}
+                                      </span>
                                     )}
                                   </div>
 
