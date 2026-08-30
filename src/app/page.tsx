@@ -183,6 +183,10 @@ export default function FantasyDraftApp() {
       const canvas = await html2canvas(boardRef.current, {
         backgroundColor: '#0f172a', // Tailwind slate-950 equivalent
         scale: 2, // 2x resolution for pristine zooming
+        useCORS: true, // CRITICAL: Allows capturing Google Fonts on live Vercel deployments
+        allowTaint: true,
+        width: boardRef.current.scrollWidth, // Ensures entire scrolled width is captured
+        height: boardRef.current.scrollHeight, // Ensures entire scrolled height is captured
       });
       const url = canvas.toDataURL('image/png');
       const link = document.createElement('a');
