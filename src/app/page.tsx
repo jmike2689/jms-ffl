@@ -8,7 +8,7 @@ import {
 import { db } from './firebase';
 import { ref, onValue, set, push } from 'firebase/database';
 import confetti from 'canvas-confetti';
-import html2canvas from 'html2canvas';
+import { toPng } from 'html-to-image';
 
 const POSITION_COLORS: Record<string, { bg: string; text: string; border: string; badge: string }> = {
   QB: { bg: 'bg-red-950/90', text: 'text-red-200', border: 'border-red-600', badge: 'bg-red-600 text-white' },
@@ -180,17 +180,17 @@ export default function FantasyDraftApp() {
     if (!boardRef.current) return;
     setIsCapturing(true);
     try {
-      const canvas = await html2canvas(boardRef.current, {
+      const dataUrl = await toPng(boardRef.current, {
         backgroundColor: '#0f172a', // Tailwind slate-950 equivalent
-        scale: 2, // 2x resolution for pristine zooming
-        useCORS: true, // CRITICAL: Allows capturing Google Fonts on live Vercel deployments
-        allowTaint: true,
+        pixelRatio: 2, // 2x resolution for pristine zooming
         width: boardRef.current.scrollWidth, // Ensures entire scrolled width is captured
         height: boardRef.current.scrollHeight, // Ensures entire scrolled height is captured
+        style: {
+          transform: 'none', // Prevent any CSS transforms from cropping the image
+        }
       });
-      const url = canvas.toDataURL('image/png');
       const link = document.createElement('a');
-      link.href = url;
+      link.href = dataUrl;
       link.download = `JMs_FFL_DraftBoard_${new Date().getFullYear()}.png`;
       document.body.appendChild(link);
       link.click();
