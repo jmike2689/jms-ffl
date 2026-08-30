@@ -472,7 +472,42 @@ export default function FantasyDraftApp() {
 
   const handleApplySettings = () => {
     if (window.confirm("Applying new settings will reset the current draft board. Continue?")) {
-      initializeBoard(tempTeams, tempRounds, customOrder, defaultPickTime);
+
+      // 1. Extract all current keepers before we destroy the board
+      const existingKeepers = picks.filter(p => p.isKeeper && p.player);
+
+      // 2. Rebuild the new board mathematically
+      const newPicks: DraftPick[] = [];
+      let overallPick = 1;
+
+      for (let r = 0; r < tempRounds; r++) {
+        const roundOrder = customOrder[r] || Array.from({ length: tempTeams.length }, (_, i) => i + 1);
+
+        roundOrder.forEach((teamId) => {
+          // 3. Check if this team had a keeper in this specific round on the old board
+          const matchingKeeper = existingKeepers.find(k => k.teamId === teamId && k.round === (r + 1));
+
+          newPicks.push({
+            round: r + 1,
+            pickNumber: overallPick++,
+            teamId,
+            player: matchingKeeper ? matchingKeeper.player : null,
+            isKeeper: matchingKeeper ? true : false
+          });
+        });
+      }
+
+      // 4. Push the newly built, keeper-protected board to Firebase
+      set(ref(db, 'draftState'), {
+        picks: newPicks,
+        currentPickIndex: 0,
+        isDraftActive: false,
+        teams: tempTeams,
+        totalRounds: tempRounds,
+        customOrder: customOrder,
+        defaultPickTime: defaultPickTime
+      });
+
       prevPickIndexRef.current = 0;
       setClockTime(defaultPickTime);
       setShowCommishTools(false);
@@ -1243,8 +1278,8 @@ export default function FantasyDraftApp() {
                             {enriched.name}
                             {enriched.injury_status && (
                               <span className={`px-1 py-[1px] rounded-[4px] text-[8px] font-black uppercase leading-none border ${['Out', 'IR', 'PUP', 'Sus', 'Suspended'].includes(enriched.injury_status) ? 'bg-red-950/80 text-red-500 border-red-500/50' :
-                                  enriched.injury_status === 'Doubtful' ? 'bg-orange-950/80 text-orange-500 border-orange-500/50' :
-                                    'bg-amber-950/80 text-amber-500 border-amber-500/50'
+                                enriched.injury_status === 'Doubtful' ? 'bg-orange-950/80 text-orange-500 border-orange-500/50' :
+                                  'bg-amber-950/80 text-amber-500 border-amber-500/50'
                                 }`}>
                                 {enriched.injury_status === 'Questionable' ? 'Q' : enriched.injury_status === 'Doubtful' ? 'D' : enriched.injury_status === 'Suspended' ? 'SUS' : enriched.injury_status}
                               </span>
@@ -1324,8 +1359,8 @@ export default function FantasyDraftApp() {
                         {player.name}
                         {player.injury_status && (
                           <span className={`px-1 py-[1px] rounded-[4px] text-[8px] font-black uppercase leading-none border ${['Out', 'IR', 'PUP', 'Sus', 'Suspended'].includes(player.injury_status) ? 'bg-red-950/80 text-red-500 border-red-500/50' :
-                              player.injury_status === 'Doubtful' ? 'bg-orange-950/80 text-orange-500 border-orange-500/50' :
-                                'bg-amber-950/80 text-amber-500 border-amber-500/50'
+                            player.injury_status === 'Doubtful' ? 'bg-orange-950/80 text-orange-500 border-orange-500/50' :
+                              'bg-amber-950/80 text-amber-500 border-amber-500/50'
                             }`}>
                             {player.injury_status === 'Questionable' ? 'Q' : player.injury_status === 'Doubtful' ? 'D' : player.injury_status === 'Suspended' ? 'SUS' : player.injury_status}
                           </span>
