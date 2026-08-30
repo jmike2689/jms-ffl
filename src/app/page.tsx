@@ -3,11 +3,12 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Trophy, Clock, Users, Settings, Play, Pause,
-  RotateCcw, Search, Lock, Unlock, ShieldAlert, Loader2, Wifi, Trash2, Save, Download, X, Copy, ArrowRightLeft, Volume2, VolumeX, UserCheck, KeyRound, MessageSquare, Send, ShieldCheck, Edit2, BookOpen
+  RotateCcw, Search, Lock, Unlock, ShieldAlert, Loader2, Wifi, Trash2, Save, Download, X, Copy, ArrowRightLeft, Volume2, VolumeX, UserCheck, KeyRound, MessageSquare, Send, ShieldCheck, Edit2, BookOpen, Camera
 } from 'lucide-react';
 import { db } from './firebase';
 import { ref, onValue, set, push } from 'firebase/database';
 import confetti from 'canvas-confetti';
+import html2canvas from 'html2canvas';
 
 const POSITION_COLORS: Record<string, { bg: string; text: string; border: string; badge: string }> = {
   QB: { bg: 'bg-red-950/90', text: 'text-red-200', border: 'border-red-600', badge: 'bg-red-600 text-white' },
@@ -145,6 +146,10 @@ export default function FantasyDraftApp() {
   const isMutedRef = useRef<boolean>(false);
   const panicAudioRef = useRef<HTMLAudioElement | null>(null);
 
+  // --- Screenshot State & Ref ---
+  const boardRef = useRef<HTMLDivElement>(null);
+  const [isCapturing, setIsCapturing] = useState<boolean>(false);
+
   const toggleMute = () => {
     setIsMuted(!isMuted);
     isMutedRef.current = !isMuted;
@@ -169,6 +174,29 @@ export default function FantasyDraftApp() {
       confetti({ ...defaults, particleCount, origin: { x: randomInRange(0.1, 0.3), y: Math.random() - 0.2 } });
       confetti({ ...defaults, particleCount, origin: { x: randomInRange(0.7, 0.9), y: Math.random() - 0.2 } });
     }, 250);
+  };
+
+  const handleDownloadBoard = async () => {
+    if (!boardRef.current) return;
+    setIsCapturing(true);
+    try {
+      const canvas = await html2canvas(boardRef.current, {
+        backgroundColor: '#0f172a', // Tailwind slate-950 equivalent
+        scale: 2, // 2x resolution for pristine zooming
+      });
+      const url = canvas.toDataURL('image/png');
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `JMs_FFL_DraftBoard_${new Date().getFullYear()}.png`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (err) {
+      console.error("Failed to capture board:", err);
+      alert("Failed to capture the board. Please try again.");
+    } finally {
+      setIsCapturing(false);
+    }
   };
 
   // Fetch API Players
@@ -473,10 +501,8 @@ export default function FantasyDraftApp() {
   const handleApplySettings = () => {
     if (window.confirm("Applying new settings will reset the current draft board. Continue?")) {
 
-      // 1. Extract all current keepers before we destroy the board
       const existingKeepers = picks.filter(p => p.isKeeper && p.player);
 
-      // 2. Rebuild the new board mathematically
       const newPicks: DraftPick[] = [];
       let overallPick = 1;
 
@@ -484,7 +510,6 @@ export default function FantasyDraftApp() {
         const roundOrder = customOrder[r] || Array.from({ length: tempTeams.length }, (_, i) => i + 1);
 
         roundOrder.forEach((teamId) => {
-          // 3. Check if this team had a keeper in this specific round on the old board
           const matchingKeeper = existingKeepers.find(k => k.teamId === teamId && k.round === (r + 1));
 
           newPicks.push({
@@ -497,7 +522,6 @@ export default function FantasyDraftApp() {
         });
       }
 
-      // 4. Push the newly built, keeper-protected board to Firebase
       set(ref(db, 'draftState'), {
         picks: newPicks,
         currentPickIndex: 0,
@@ -994,6 +1018,17 @@ export default function FantasyDraftApp() {
             )}
 
             <div className="flex items-center gap-1">
+
+              {/* Camera Snapshot Button */}
+              <button
+                onClick={handleDownloadBoard}
+                disabled={isCapturing}
+                title="Download Draft Board as PNG Image"
+                className={`p-2 rounded-lg transition ${isCapturing ? 'bg-blue-600/50 text-white cursor-wait' : 'bg-slate-800 text-slate-300 hover:text-white'}`}
+              >
+                {isCapturing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Camera className="w-5 h-5" />}
+              </button>
+
               <button
                 onClick={() => setShowBylawsModal(true)}
                 title="View League Bylaws"
@@ -1010,6 +1045,7 @@ export default function FantasyDraftApp() {
                 {isMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
               </button>
 
+              {/* Commissioner Unlock / Gear Button */}
               <button
                 onClick={toggleCommishPanel}
                 title={isCommissioner ? "Commissioner Tools" : "Unlock Commissioner Access"}
@@ -1278,8 +1314,8 @@ export default function FantasyDraftApp() {
                             {enriched.name}
                             {enriched.injury_status && (
                               <span className={`px-1 py-[1px] rounded-[4px] text-[8px] font-black uppercase leading-none border ${['Out', 'IR', 'PUP', 'Sus', 'Suspended'].includes(enriched.injury_status) ? 'bg-red-950/80 text-red-500 border-red-500/50' :
-                                enriched.injury_status === 'Doubtful' ? 'bg-orange-950/80 text-orange-500 border-orange-500/50' :
-                                  'bg-amber-950/80 text-amber-500 border-amber-500/50'
+                                  enriched.injury_status === 'Doubtful' ? 'bg-orange-950/80 text-orange-500 border-orange-500/50' :
+                                    'bg-amber-950/80 text-amber-500 border-amber-500/50'
                                 }`}>
                                 {enriched.injury_status === 'Questionable' ? 'Q' : enriched.injury_status === 'Doubtful' ? 'D' : enriched.injury_status === 'Suspended' ? 'SUS' : enriched.injury_status}
                               </span>
@@ -1310,7 +1346,7 @@ export default function FantasyDraftApp() {
           </div>
         )}
 
-        {/* Sidebar (Players & Chat) - Now Fixed Width instead of 25% */}
+        {/* Sidebar (Players & Chat) - Fixed Width */}
         <div className="w-full lg:w-[340px] xl:w-[380px] flex-shrink-0 flex flex-col gap-4 h-[780px] lg:h-[calc(100vh-110px)]">
 
           {/* Players Panel (Top Half) */}
@@ -1359,8 +1395,8 @@ export default function FantasyDraftApp() {
                         {player.name}
                         {player.injury_status && (
                           <span className={`px-1 py-[1px] rounded-[4px] text-[8px] font-black uppercase leading-none border ${['Out', 'IR', 'PUP', 'Sus', 'Suspended'].includes(player.injury_status) ? 'bg-red-950/80 text-red-500 border-red-500/50' :
-                            player.injury_status === 'Doubtful' ? 'bg-orange-950/80 text-orange-500 border-orange-500/50' :
-                              'bg-amber-950/80 text-amber-500 border-amber-500/50'
+                              player.injury_status === 'Doubtful' ? 'bg-orange-950/80 text-orange-500 border-orange-500/50' :
+                                'bg-amber-950/80 text-amber-500 border-amber-500/50'
                             }`}>
                             {player.injury_status === 'Questionable' ? 'Q' : player.injury_status === 'Doubtful' ? 'D' : player.injury_status === 'Suspended' ? 'SUS' : player.injury_status}
                           </span>
@@ -1444,7 +1480,9 @@ export default function FantasyDraftApp() {
         <div className="flex-1 min-w-0 bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col h-[780px] lg:h-[calc(100vh-110px)] overflow-hidden">
           <h2 className="font-bold text-sm flex items-center gap-2 mb-3 pb-2 border-b border-slate-800"><Trophy className="w-4 h-4 text-amber-400" /> Draft Board Grid</h2>
           <div className="flex-1 overflow-x-auto overflow-y-auto">
-            <div className="inline-block pb-8 w-full" style={{ minWidth: `${50 + (teams.length * 90)}px` }}>
+
+            {/* The ref is attached to this container which expands to hold the entire un-scrolled grid */}
+            <div ref={boardRef} className="inline-block pb-8 w-full bg-slate-900 p-2" style={{ minWidth: `${50 + (teams.length * 90)}px` }}>
 
               {/* Header Row */}
               <div
