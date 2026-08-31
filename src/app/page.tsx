@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Trophy, Clock, Users, Settings, Play, Pause,
-  RotateCcw, Search, Lock, Unlock, ShieldAlert, Loader2, Wifi, Trash2, Save, Download, X, Copy, ArrowRightLeft, Volume2, VolumeX, UserCheck, KeyRound, MessageSquare, Send, ShieldCheck, Edit2, BookOpen, Camera
+  RotateCcw, Search, Lock, Unlock, ShieldAlert, Loader2, Wifi, Trash2, Save, Download, X, Copy, ArrowRightLeft, Volume2, VolumeX, UserCheck, KeyRound, MessageSquare, Send, ShieldCheck, Edit2, BookOpen, Camera, DollarSign, CheckCircle2, AlertTriangle
 } from 'lucide-react';
 import { db } from './firebase';
 import { ref, onValue, set, push } from 'firebase/database';
@@ -21,6 +21,7 @@ const POSITION_COLORS: Record<string, { bg: string; text: string; border: string
 
 // --- COMMISSIONER SECRET PIN ---
 const COMMISSIONER_PIN = '0021';
+const BUY_IN_AMOUNT = 25;
 
 interface Player {
   id: string;
@@ -88,6 +89,7 @@ export default function FantasyDraftApp() {
   const [totalRounds, setTotalRounds] = useState<number>(15);
   const [teams, setTeams] = useState<Team[]>(generateTeams(10));
   const [teamPins, setTeamPins] = useState<Record<number, string>>({});
+  const [paidTeams, setPaidTeams] = useState<Record<number, boolean>>({});
 
   const [tempRounds, setTempRounds] = useState<number>(15);
   const [tempTeams, setTempTeams] = useState<Team[]>(generateTeams(10));
@@ -181,12 +183,12 @@ export default function FantasyDraftApp() {
     setIsCapturing(true);
     try {
       const dataUrl = await toPng(boardRef.current, {
-        backgroundColor: '#0f172a', // Tailwind slate-950 equivalent
-        pixelRatio: 2, // 2x resolution for pristine zooming
-        width: boardRef.current.scrollWidth, // Ensures entire scrolled width is captured
-        height: boardRef.current.scrollHeight, // Ensures entire scrolled height is captured
+        backgroundColor: '#0f172a',
+        pixelRatio: 2,
+        width: boardRef.current.scrollWidth,
+        height: boardRef.current.scrollHeight,
         style: {
-          transform: 'none', // Prevent any CSS transforms from cropping the image
+          transform: 'none',
         }
       });
       const link = document.createElement('a');
@@ -231,6 +233,7 @@ export default function FantasyDraftApp() {
         if (data.customOrder) setCustomOrder(data.customOrder);
         if (data.defaultPickTime) setDefaultPickTime(data.defaultPickTime);
         if (data.teamPins) setTeamPins(data.teamPins); else setTeamPins({});
+        if (data.paidTeams) setPaidTeams(data.paidTeams); else setPaidTeams({});
         if (typeof data.isDraftActive === 'boolean') setIsDraftActive(data.isDraftActive);
 
         if (typeof data.currentPickIndex === 'number') {
@@ -295,7 +298,8 @@ export default function FantasyDraftApp() {
       teams: activeTeams,
       totalRounds: rounds,
       customOrder: orderMatrix,
-      defaultPickTime: currentDefaultPickTime
+      defaultPickTime: currentDefaultPickTime,
+      paidTeams: {}
     });
   };
 
@@ -319,6 +323,12 @@ export default function FantasyDraftApp() {
       nextIdx = getNextEmptyPick(picks, currentPickIndex);
     }
     updateFirebaseState(picks, nextIdx, !isDraftActive);
+  };
+
+  // --- TOGGLE PAID STATUS ---
+  const togglePaidStatus = (teamId: number) => {
+    const isCurrentlyPaid = !!paidTeams[teamId];
+    set(ref(db, `draftState/paidTeams/${teamId}`), !isCurrentlyPaid);
   };
 
   // --- ADVANCED TIMER LOGIC (SKIP ON ZERO + PANIC TICK) ---
@@ -402,6 +412,11 @@ export default function FantasyDraftApp() {
   const activeUserTeam = userTeamId ? teams.find((t) => t.id === userTeamId) : null;
   const myFirstEmpty = userTeamId ? picks.findIndex(p => p.teamId === userTeamId && !p.player) : -1;
   const isMyTurnOrSkipped = myFirstEmpty !== -1 && myFirstEmpty <= currentPickIndex;
+
+  // Pot Calculations
+  const paidCount = Object.values(paidTeams).filter(Boolean).length;
+  const totalPot = paidCount * BUY_IN_AMOUNT;
+  const maxPot = teams.length * BUY_IN_AMOUNT;
 
   // --- RECENT PICKS TRACKER (SCARCITY) ---
   const recentPositions = useMemo(() => {
@@ -533,7 +548,8 @@ export default function FantasyDraftApp() {
         teams: tempTeams,
         totalRounds: tempRounds,
         customOrder: customOrder,
-        defaultPickTime: defaultPickTime
+        defaultPickTime: defaultPickTime,
+        paidTeams: paidTeams
       });
 
       prevPickIndexRef.current = 0;
@@ -800,9 +816,11 @@ export default function FantasyDraftApp() {
     );
   };
 
-  // --- LOGIN MODAL ---
+  // --- LOGIN MODAL WITH DUES GATEKEEPER ---
   const renderLoginModal = () => {
     if (!showLoginModal) return null;
+    const isTargetPaid = loginTargetTeam ? !!paidTeams[loginTargetTeam.id] : false;
+
     return (
       <div className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-sm flex items-center justify-center p-4">
         <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden">
@@ -819,28 +837,62 @@ export default function FantasyDraftApp() {
           <div className="p-5 space-y-3">
             {loginStep === 'select' ? (
               <>
-                <p className="text-xs text-slate-400 mb-2">Select your team below. You will be prompted to create or enter your team PIN.</p>
+                <p className="text-xs text-slate-400 mb-2">Select your team below. Dues must be verified by the Commissioner before logging in or creating a PIN.</p>
                 <div className="grid grid-cols-1 gap-2 max-h-80 overflow-y-auto pr-1">
-                  {teams.map((t) => (
-                    <button
-                      key={t.id}
-                      onClick={() => {
-                        setLoginTargetTeam(t);
-                        setLoginStep('pin');
-                        setLoginError('');
-                      }}
-                      className={`flex items-center justify-between p-3 rounded-xl border text-left transition ${t.id === userTeamId ? 'bg-blue-600/20 border-blue-500 text-white font-bold' : 'bg-slate-950/50 border-slate-800/80 hover:bg-slate-800/50 text-slate-300'}`}
-                    >
-                      <span>{t.name}</span>
-                      <div className="flex items-center gap-2">
-                        {teamPins[t.id] ? <ShieldCheck className="w-4 h-4 text-emerald-500" /> : <span className="text-[10px] text-slate-500 uppercase font-bold">Unclaimed</span>}
-                        {t.id === userTeamId && <span className="text-xs bg-blue-600 px-2 py-0.5 rounded text-white font-bold">Active</span>}
-                      </div>
-                    </button>
-                  ))}
+                  {teams.map((t) => {
+                    const isPaid = !!paidTeams[t.id];
+                    return (
+                      <button
+                        key={t.id}
+                        onClick={() => {
+                          setLoginTargetTeam(t);
+                          setLoginStep('pin');
+                          setLoginError('');
+                        }}
+                        className={`flex items-center justify-between p-3 rounded-xl border text-left transition ${t.id === userTeamId ? 'bg-blue-600/20 border-blue-500 text-white font-bold' : 'bg-slate-950/50 border-slate-800/80 hover:bg-slate-800/50 text-slate-300'}`}
+                      >
+                        <div className="flex flex-col">
+                          <span className="font-bold">{t.name}</span>
+                          <span className="text-[10px] text-slate-500">{t.owner}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {isPaid ? (
+                            <span className="flex items-center gap-1 text-[10px] font-bold bg-emerald-950/80 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full">
+                              <CheckCircle2 className="w-3 h-3" /> Paid
+                            </span>
+                          ) : (
+                            <span className="flex items-center gap-1 text-[10px] font-bold bg-amber-950/80 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded-full animate-pulse">
+                              <AlertTriangle className="w-3 h-3" /> Unpaid
+                            </span>
+                          )}
+                          {t.id === userTeamId && <span className="text-xs bg-blue-600 px-2 py-0.5 rounded text-white font-bold">Active</span>}
+                        </div>
+                      </button>
+                    );
+                  })}
                 </div>
               </>
+            ) : !isTargetPaid && !isCommissioner ? (
+              // --- DUES LOCKOUT SCREEN ---
+              <div className="text-center py-6 px-2">
+                <div className="inline-flex p-3 bg-amber-500/10 border border-amber-500/30 rounded-full text-amber-400 mb-3">
+                  <DollarSign className="w-8 h-8 animate-bounce" />
+                </div>
+                <h4 className="text-base font-black text-white mb-1">Dues Verification Required</h4>
+                <p className="text-xs text-slate-400 max-w-xs mx-auto mb-5 leading-relaxed">
+                  The <strong className="text-white">${BUY_IN_AMOUNT} league buy-in</strong> has not been verified for <strong className="text-blue-400">{loginTargetTeam?.name}</strong>. Pay the Commissioner to unlock your PIN and draft permissions!
+                </p>
+                <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 mb-5 text-left">
+                  <div className="text-[10px] font-bold uppercase text-slate-500 mb-1">League Entry Fee</div>
+                  <div className="text-lg font-black text-emerald-400">${BUY_IN_AMOUNT}.00</div>
+                  <div className="text-[10px] text-slate-400 mt-1">Once received, the Commissioner will flip your status to Paid.</div>
+                </div>
+                <button onClick={() => { setLoginStep('select'); setLoginError(''); setLoginPin(''); }} className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-xs font-bold rounded-xl transition text-white">
+                  Back to Team Selection
+                </button>
+              </div>
             ) : (
+              // --- PIN LOGIN SCREEN ---
               <div className="text-center py-4">
                 <p className="text-sm font-semibold text-white mb-1">
                   {teamPins[loginTargetTeam!.id] ? 'Enter your 4-digit PIN to login' : 'Create a 4-digit PIN to claim this team'}
@@ -916,13 +968,33 @@ export default function FantasyDraftApp() {
           </div>
           <h1 className="text-3xl font-bold text-white mb-2">Fantasy League Draft Room</h1>
 
-          <div className="grid grid-cols-4 gap-3 mb-8 mt-6 w-full max-w-sm">
+          <div className="grid grid-cols-4 gap-3 mb-6 mt-6 w-full max-w-sm">
             {[{ l: 'Days', v: timeLeft.days }, { l: 'Hours', v: timeLeft.hours }, { l: 'Mins', v: timeLeft.minutes }, { l: 'Secs', v: timeLeft.seconds }].map((item, idx) => (
               <div key={idx} className="bg-slate-800 border border-slate-700 rounded-xl p-3 text-center">
                 <span className="block text-3xl font-extrabold text-blue-400">{item.v}</span>
                 <span className="text-xs text-slate-400 uppercase">{item.l}</span>
               </div>
             ))}
+          </div>
+
+          {/* PRIZE POT PROGRESS METER */}
+          <div className="w-full max-w-sm bg-slate-950 border border-slate-800 rounded-xl p-3.5 mb-6 text-left">
+            <div className="flex justify-between items-center mb-1.5">
+              <span className="text-xs font-bold text-slate-400 flex items-center gap-1.5 uppercase tracking-wider">
+                <DollarSign className="w-3.5 h-3.5 text-emerald-400" /> Prize Pot Collected
+              </span>
+              <span className="text-xs font-black text-emerald-400">${totalPot} / ${maxPot}</span>
+            </div>
+            <div className="w-full bg-slate-800 rounded-full h-2.5 overflow-hidden">
+              <div
+                className="bg-emerald-500 h-full rounded-full transition-all duration-500"
+                style={{ width: `${Math.min(100, (totalPot / (maxPot || 1)) * 100)}%` }}
+              />
+            </div>
+            <div className="flex justify-between text-[10px] text-slate-500 mt-1 font-semibold">
+              <span>{paidCount} of {teams.length} Teams Paid</span>
+              <span>${BUY_IN_AMOUNT} Buy-in</span>
+            </div>
           </div>
 
           <div className="w-full max-w-sm border-t border-slate-800 pt-6 flex flex-col gap-3">
@@ -1165,27 +1237,42 @@ export default function FantasyDraftApp() {
                 </div>
               </div>
 
+              {/* DUES & PIN MANAGEMENT */}
               <div>
-                <label className="block text-[10px] uppercase font-bold text-slate-500 mb-2 mt-4">Customize Team Names & PINs</label>
-                <div className="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto pr-2">
-                  {tempTeams.map((team, idx) => (
-                    <div key={team.id} className="flex flex-col gap-1 bg-slate-950 p-2 rounded-lg border border-slate-800">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[10px] font-bold text-slate-500">{idx + 1}.</span>
-                        {teamPins[team.id] ? (
-                          <button onClick={() => set(ref(db, `draftState/teamPins/${team.id}`), null)} className="text-[9px] text-red-400 hover:text-red-300 font-bold bg-red-950/50 px-1.5 py-0.5 rounded">Clear PIN</button>
-                        ) : (
-                          <span className="text-[9px] text-slate-500 font-bold">Unclaimed</span>
-                        )}
+                <div className="flex justify-between items-center mb-2 mt-4">
+                  <label className="text-[10px] uppercase font-bold text-slate-500">Team Names, PINs & Dues ($25)</label>
+                  <span className="text-[10px] font-black text-emerald-400">${totalPot} / ${maxPot} Collected</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-2">
+                  {tempTeams.map((team, idx) => {
+                    const isPaid = !!paidTeams[team.id];
+                    return (
+                      <div key={team.id} className="flex flex-col gap-1.5 bg-slate-950 p-2.5 rounded-lg border border-slate-800">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-bold text-slate-500">{idx + 1}.</span>
+                          <div className="flex items-center gap-1.5">
+                            {/* Dues Toggle */}
+                            <button
+                              onClick={() => togglePaidStatus(team.id)}
+                              className={`text-[9px] font-black px-2 py-0.5 rounded transition ${isPaid ? 'bg-emerald-600 text-white hover:bg-emerald-500' : 'bg-amber-500/20 text-amber-400 border border-amber-500/30 hover:bg-amber-500 hover:text-white'}`}
+                            >
+                              {isPaid ? '$25 Paid ✅' : 'Unpaid ❌'}
+                            </button>
+
+                            {teamPins[team.id] ? (
+                              <button onClick={() => set(ref(db, `draftState/teamPins/${team.id}`), null)} className="text-[9px] text-red-400 hover:text-red-300 font-bold bg-red-950/50 px-1.5 py-0.5 rounded">Reset PIN</button>
+                            ) : null}
+                          </div>
+                        </div>
+                        <input
+                          type="text"
+                          value={team.name}
+                          onChange={(e) => updateTempTeamName(idx, e.target.value)}
+                          className="w-full bg-transparent text-xs text-white outline-none border-b border-slate-800 focus:border-blue-500 pb-0.5"
+                        />
                       </div>
-                      <input
-                        type="text"
-                        value={team.name}
-                        onChange={(e) => updateTempTeamName(idx, e.target.value)}
-                        className="w-full bg-transparent text-xs text-white outline-none"
-                      />
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
                 <button
                   onClick={() => {
@@ -1543,7 +1630,6 @@ export default function FantasyDraftApp() {
                               const isCurrent = pickIndex === currentPickIndex;
                               const isSkipped = !pick.player && pickIndex < currentPickIndex;
 
-                              // ENRICH WITH MASTER DATA SO KEEPERS SHOW BYE/INJURY
                               const enriched = getEnrichedPlayer(pick.player);
                               const posStyle = enriched ? POSITION_COLORS[enriched.position] : null;
                               const split = enriched ? getSplitName(enriched.name) : null;
