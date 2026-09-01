@@ -327,13 +327,11 @@ export default function FantasyDraftApp() {
     updateFirebaseState(picks, nextIdx, !isDraftActive);
   };
 
-  // --- TOGGLE PAID STATUS ---
   const togglePaidStatus = (teamId: number) => {
     const isCurrentlyPaid = !!paidTeams[teamId];
     set(ref(db, `draftState/paidTeams/${teamId}`), !isCurrentlyPaid);
   };
 
-  // --- ADVANCED TIMER LOGIC (SKIP ON ZERO + PANIC TICK) ---
   useEffect(() => {
     let timer: NodeJS.Timeout;
     if (isDraftActive && clockTime > 0 && currentPickIndex < picks.length) {
@@ -356,7 +354,6 @@ export default function FantasyDraftApp() {
     return () => clearInterval(timer);
   }, [isDraftActive, clockTime, currentPickIndex, picks, defaultPickTime]);
 
-  // --- STOP PANIC AUDIO ON PICK / RESET / PAUSE ---
   useEffect(() => {
     if (clockTime > 10 || !isDraftActive) {
       if (panicAudioRef.current) {
@@ -394,7 +391,6 @@ export default function FantasyDraftApp() {
     return () => clearInterval(interval);
   }, [targetDate]);
 
-  // --- HELPER TO RE-HYDRATE PLAYERS WITH LATEST MASTER DATA ---
   const getEnrichedPlayer = (player: Player | null): Player | null => {
     if (!player) return null;
     const master = players.find((p) => p.id === player.id);
@@ -408,19 +404,16 @@ export default function FantasyDraftApp() {
     };
   };
 
-  // --- STATE VARIABLES FOR UI PERMISSIONS ---
   const currentPick = picks[currentPickIndex];
   const currentPickingTeam = teams.find((t) => t.id === currentPick?.teamId);
   const activeUserTeam = userTeamId ? teams.find((t) => t.id === userTeamId) : null;
   const myFirstEmpty = userTeamId ? picks.findIndex(p => p.teamId === userTeamId && !p.player) : -1;
   const isMyTurnOrSkipped = myFirstEmpty !== -1 && myFirstEmpty <= currentPickIndex;
 
-  // Pot Calculations
   const paidCount = Object.values(paidTeams).filter(Boolean).length;
   const totalPot = paidCount * BUY_IN_AMOUNT;
   const maxPot = teams.length * BUY_IN_AMOUNT;
 
-  // --- RECENT PICKS TRACKER (SCARCITY) ---
   const recentPositions = useMemo(() => {
     const drafted = picks.filter(p => p.player).sort((a, b) => b.pickNumber - a.pickNumber).slice(0, 10);
     return drafted.reduce((acc, pick) => {
@@ -440,10 +433,8 @@ export default function FantasyDraftApp() {
       .sort((a, b) => a.adp - b.adp);
   }, [players, picks, selectedPos, searchQuery]);
 
-  // --- REWIRED DRAFT LOGIC FOR MAKEUP PICKS ---
   const handleSelectPlayer = (player: Player) => {
     let targetIndex = currentPickIndex;
-
     if (!isCommissioner) {
       if (myFirstEmpty !== -1 && myFirstEmpty <= currentPickIndex) {
         targetIndex = myFirstEmpty;
@@ -455,7 +446,6 @@ export default function FantasyDraftApp() {
         targetIndex = picks.findIndex(p => !p.player);
       }
     }
-
     if (targetIndex >= picks.length || targetIndex === -1) return;
 
     const updatedPicks = [...picks];
@@ -468,8 +458,6 @@ export default function FantasyDraftApp() {
       updateFirebaseState(updatedPicks, nextIndex, isDraftActive);
       setClockTime(defaultPickTime);
     }
-
-    // Auto-close the player drawer after a successful pick
     setIsPlayersOpen(false);
   };
 
@@ -525,22 +513,16 @@ export default function FantasyDraftApp() {
 
   const handleApplySettings = () => {
     if (window.confirm("Applying new settings will reset the current draft board. Continue?")) {
-
       const existingKeepers = picks.filter(p => p.isKeeper && p.player);
-
       const newPicks: DraftPick[] = [];
       let overallPick = 1;
 
       for (let r = 0; r < tempRounds; r++) {
         const roundOrder = customOrder[r] || Array.from({ length: tempTeams.length }, (_, i) => i + 1);
-
         roundOrder.forEach((teamId) => {
           const matchingKeeper = existingKeepers.find(k => k.teamId === teamId && k.round === (r + 1));
-
           newPicks.push({
-            round: r + 1,
-            pickNumber: overallPick++,
-            teamId,
+            round: r + 1, pickNumber: overallPick++, teamId,
             player: matchingKeeper ? matchingKeeper.player : null,
             isKeeper: matchingKeeper ? true : false
           });
@@ -548,14 +530,9 @@ export default function FantasyDraftApp() {
       }
 
       set(ref(db, 'draftState'), {
-        picks: newPicks,
-        currentPickIndex: 0,
-        isDraftActive: false,
-        teams: tempTeams,
-        totalRounds: tempRounds,
-        customOrder: customOrder,
-        defaultPickTime: defaultPickTime,
-        paidTeams: paidTeams
+        picks: newPicks, currentPickIndex: 0, isDraftActive: false,
+        teams: tempTeams, totalRounds: tempRounds, customOrder: customOrder,
+        defaultPickTime: defaultPickTime, paidTeams: paidTeams
       });
 
       prevPickIndexRef.current = 0;
@@ -650,7 +627,6 @@ export default function FantasyDraftApp() {
       } else {
         setShowCommishTools(true);
       }
-
       setShowCommishPinModal(false);
       setInputPin('');
       setPinError('');
@@ -891,7 +867,6 @@ export default function FantasyDraftApp() {
                 <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 mb-5 text-left">
                   <div className="text-[10px] font-bold uppercase text-slate-500 mb-1">League Entry Fee</div>
                   <div className="text-lg font-black text-emerald-400">${BUY_IN_AMOUNT}.00</div>
-                  <div className="text-[10px] text-slate-400 mt-1">Once received, the Commissioner will flip your status to Paid.</div>
                 </div>
                 <button onClick={() => { setLoginStep('select'); setLoginError(''); setLoginPin(''); }} className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-xs font-bold rounded-xl transition text-white">
                   Back to Team Selection
@@ -902,9 +877,6 @@ export default function FantasyDraftApp() {
               <div className="text-center py-4">
                 <p className="text-sm font-semibold text-white mb-1">
                   {teamPins[loginTargetTeam!.id] ? 'Enter your 4-digit PIN to login' : 'Create a 4-digit PIN to claim this team'}
-                </p>
-                <p className="text-xs text-slate-400 mb-4">
-                  {teamPins[loginTargetTeam!.id] ? 'If you forgot your PIN, ask the Commish to reset it.' : 'Remember this PIN! You will need it to switch devices.'}
                 </p>
 
                 <input
@@ -942,7 +914,6 @@ export default function FantasyDraftApp() {
             <ShieldAlert className="w-8 h-8" />
           </div>
           <h3 className="font-extrabold text-lg text-white mb-1">Commissioner Access</h3>
-          <p className="text-xs text-slate-400 mb-4">Enter your passcode to unlock.</p>
 
           <input
             type="password"
@@ -1004,22 +975,13 @@ export default function FantasyDraftApp() {
           </div>
 
           <div className="w-full max-w-sm border-t border-slate-800 pt-6 flex flex-col gap-3">
-            <button
-              onClick={() => setShowLoginModal(true)}
-              className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition shadow-lg shadow-blue-900/20"
-            >
+            <button onClick={() => setShowLoginModal(true)} className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition shadow-lg shadow-blue-900/20">
               <UserCheck className="w-5 h-5" /> Team Manager Check-In
             </button>
-            <button
-              onClick={() => setShowBylawsModal(true)}
-              className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-xl transition text-xs"
-            >
+            <button onClick={() => setShowBylawsModal(true)} className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-xl transition text-xs">
               <BookOpen className="w-4 h-4" /> View League Bylaws
             </button>
-            <button
-              onClick={() => setShowCommishPinModal(true)}
-              className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-xl transition text-xs"
-            >
+            <button onClick={() => setShowCommishPinModal(true)} className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-xl transition text-xs">
               <KeyRound className="w-4 h-4" /> Commissioner Override
             </button>
           </div>
@@ -1035,123 +997,71 @@ export default function FantasyDraftApp() {
   // --- MAIN APP RENDER ---
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col overflow-x-hidden">
-      {/* Header */}
-      <header className="bg-slate-900 border-b border-slate-800 px-4 py-3 sticky top-0 z-30">
-        <div className="w-full mx-auto flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-blue-600 rounded-lg text-white"><Trophy className="w-6 h-6" /></div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-xl font-black text-white">JM's FFL - Year 14</h1>
-                <span className="flex items-center gap-1 text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full font-bold">
-                  <Wifi className="w-3 h-3 animate-pulse" /> Live Sync
-                </span>
+
+      {/* --- RESPONSIVE MOBILE & DESKTOP HEADER --- */}
+      <header className="bg-slate-900 border-b border-slate-800 px-2 sm:px-4 py-2 sm:py-3 sticky top-0 z-30">
+        <div className="w-full mx-auto flex flex-col lg:flex-row lg:items-center justify-between gap-3 lg:gap-4">
+
+          {/* Top row for mobile: Title & Icons */}
+          <div className="flex items-center justify-between w-full lg:w-auto">
+            <div className="flex items-center gap-2 sm:gap-3">
+              <div className="p-1.5 sm:p-2 bg-blue-600 rounded-lg text-white"><Trophy className="w-5 h-5 sm:w-6 sm:h-6" /></div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h1 className="text-lg sm:text-xl font-black text-white leading-none">JM's FFL</h1>
+                  <span className="hidden sm:flex items-center gap-1 text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full font-bold">
+                    <Wifi className="w-3 h-3 animate-pulse" /> Live
+                  </span>
+                </div>
+                <p className="text-[10px] sm:text-xs text-slate-400 font-medium">{teams.length}-Team Draft</p>
               </div>
-              <p className="text-xs text-slate-400 font-medium">{teams.length}-Team Custom Draft Board</p>
+            </div>
+
+            {/* Quick Actions for Mobile */}
+            <div className="flex lg:hidden items-center gap-1">
+              <button onClick={() => setShowLoginModal(true)} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-white transition"><UserCheck className="w-4 h-4" /></button>
+              <button onClick={() => setIsPlayersOpen(true)} className="p-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-white transition"><Search className="w-4 h-4" /></button>
+              <button onClick={() => setIsChatOpen(true)} className="p-2 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-white transition"><MessageSquare className="w-4 h-4" /></button>
             </div>
           </div>
 
-          <div className="flex items-center gap-4">
+          {/* Horizontally Scrollable Tool Bar on Mobile */}
+          <div className="flex items-center gap-2 sm:gap-4 overflow-x-auto pb-1 sm:pb-0 scrollbar-hide w-full lg:w-auto">
 
-            {/* NEW SLIDE-OVER PANEL BUTTONS */}
-            <div className="flex items-center gap-2 bg-slate-950 p-1.5 rounded-xl border border-slate-800">
-              <button
-                onClick={() => setIsPlayersOpen(true)}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-sm font-bold text-white transition shadow-sm"
-              >
-                <Search className="w-4 h-4 text-blue-400" /> Draft Pool
-              </button>
-              <button
-                onClick={() => setIsChatOpen(true)}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-sm font-bold text-white transition shadow-sm"
-              >
-                <MessageSquare className="w-4 h-4 text-emerald-400" /> League Chat
-              </button>
+            {/* Desktop Panels (Hidden on mobile to save space) */}
+            <div className="hidden lg:flex items-center gap-2 bg-slate-950 p-1.5 rounded-xl border border-slate-800 flex-shrink-0">
+              <button onClick={() => setIsPlayersOpen(true)} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-sm font-bold text-white transition"><Search className="w-4 h-4 text-blue-400" /> Draft Pool</button>
+              <button onClick={() => setIsChatOpen(true)} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-sm font-bold text-white transition"><MessageSquare className="w-4 h-4 text-emerald-400" /> League Chat</button>
             </div>
 
             {/* PANIC CLOCK UI */}
-            <div className={`flex items-center gap-6 rounded-xl px-4 py-2 border transition-all ${clockTime <= 10 && isDraftActive ? 'bg-red-950 border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.4)]' : 'bg-slate-950 border-slate-800'}`}>
-              <div className="flex items-center gap-2">
-                <Clock className={`w-5 h-5 ${clockTime <= 10 && isDraftActive ? 'text-red-500 animate-pulse' : 'text-blue-400'}`} />
-                <span className={`text-2xl font-mono font-bold ${clockTime <= 10 && isDraftActive ? 'text-red-500' : 'text-white'}`}>
+            <div className={`flex items-center gap-3 sm:gap-6 rounded-xl px-3 py-1.5 sm:px-4 sm:py-2 border transition-all flex-shrink-0 ${clockTime <= 10 && isDraftActive ? 'bg-red-950 border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.4)]' : 'bg-slate-950 border-slate-800'}`}>
+              <div className="flex items-center gap-1.5 sm:gap-2">
+                <Clock className={`w-4 h-4 sm:w-5 sm:h-5 ${clockTime <= 10 && isDraftActive ? 'text-red-500 animate-pulse' : 'text-blue-400'}`} />
+                <span className={`text-xl sm:text-2xl font-mono font-bold ${clockTime <= 10 && isDraftActive ? 'text-red-500' : 'text-white'}`}>
                   {Math.floor(clockTime / 60)}:{(clockTime % 60).toString().padStart(2, '0')}
                 </span>
               </div>
-              <div className={`h-8 w-[1px] ${clockTime <= 10 && isDraftActive ? 'bg-red-500/30' : 'bg-slate-800'}`} />
-              <div>
-                <div className="text-[10px] text-slate-400 uppercase font-bold">On The Clock</div>
-                <div className={`text-sm font-bold ${clockTime <= 10 && isDraftActive ? 'text-red-400' : 'text-blue-400'}`}>
-                  {currentPick ? `Pick #${currentPick.pickNumber} (R${currentPick.round}) - ${currentPickingTeam?.name}` : 'Draft Complete!'}
+              <div className={`h-6 sm:h-8 w-[1px] ${clockTime <= 10 && isDraftActive ? 'bg-red-500/30' : 'bg-slate-800'}`} />
+              <div className="text-left">
+                <div className="text-[8px] sm:text-[10px] text-slate-400 uppercase font-bold leading-none mb-0.5">On The Clock</div>
+                <div className={`text-[10px] sm:text-sm font-bold truncate max-w-[120px] sm:max-w-[200px] leading-tight ${clockTime <= 10 && isDraftActive ? 'text-red-400' : 'text-blue-400'}`}>
+                  {currentPick ? `${currentPick.pickNumber} (${currentPickingTeam?.name})` : 'Draft Complete!'}
                 </div>
               </div>
             </div>
-          </div>
 
-          <div className="flex items-center gap-3">
-            {isCommissioner && (
-              <button
-                onClick={toggleDraftStatus}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg font-semibold text-sm transition ${isDraftActive ? 'bg-amber-600/20 text-amber-300 border border-amber-500' : 'bg-emerald-600 text-white'}`}
-              >
-                {isDraftActive ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />} {isDraftActive ? 'Pause Draft' : 'Start Draft'}
-              </button>
-            )}
-
-            {/* Team Manager Login Button */}
-            <button
-              onClick={() => setShowLoginModal(true)}
-              className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-lg border border-slate-700 text-xs transition"
-            >
-              <UserCheck className={`w-4 h-4 ${activeUserTeam ? 'text-emerald-400' : 'text-slate-500'}`} />
-              <div className="text-left">
-                <div className="text-[9px] uppercase font-bold text-slate-400 leading-none">Logged in as</div>
-                <div className={`font-bold max-w-[110px] truncate ${activeUserTeam ? 'text-white' : 'text-slate-500 italic'}`}>
-                  {activeUserTeam?.name || 'Spectator Mode'}
-                </div>
-              </div>
-            </button>
-
-            {isCommissioner && (
-              <div className="bg-slate-800 p-1 rounded-lg flex gap-1 border border-slate-700">
-                <button onClick={() => setDraftMode('mock')} className={`px-3 py-1 text-xs font-bold rounded-md ${draftMode === 'mock' ? 'bg-blue-600 text-white' : 'text-slate-400'}`}>Mock</button>
-                <button onClick={() => setDraftMode('live')} className={`px-3 py-1 text-xs font-bold rounded-md ${draftMode === 'live' ? 'bg-blue-600 text-white' : 'text-slate-400'}`}>Live</button>
-              </div>
-            )}
-
-            <div className="flex items-center gap-1">
-
-              <button
-                onClick={handleDownloadBoard}
-                disabled={isCapturing}
-                title="Download Draft Board as PNG Image"
-                className={`p-2 rounded-lg transition ${isCapturing ? 'bg-blue-600/50 text-white cursor-wait' : 'bg-slate-800 text-slate-300 hover:text-white'}`}
-              >
-                {isCapturing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Camera className="w-5 h-5" />}
-              </button>
-
-              <button
-                onClick={() => setShowBylawsModal(true)}
-                title="View League Bylaws"
-                className="p-2 rounded-lg bg-slate-800 text-slate-300 hover:text-white transition"
-              >
-                <BookOpen className="w-5 h-5" />
-              </button>
-
-              <button
-                onClick={toggleMute}
-                title={isMuted ? "Unmute Draft Chime" : "Mute Draft Chime"}
-                className={`p-2 rounded-lg transition ${isMuted ? 'bg-red-600/20 text-red-400 hover:bg-red-600 hover:text-white' : 'bg-slate-800 text-slate-300 hover:text-white'}`}
-              >
-                {isMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
-              </button>
-
-              <button
-                onClick={toggleCommishPanel}
-                title={isCommissioner ? "Commissioner Tools" : "Unlock Commissioner Access"}
-                className={`p-2 rounded-lg transition ${isCommissioner ? (showCommishTools ? 'bg-blue-600 text-white' : 'bg-blue-900/50 text-blue-400 border border-blue-500/50') : 'bg-slate-800 text-slate-400 hover:text-white'}`}
-              >
-                {isCommissioner ? <Settings className="w-5 h-5" /> : <KeyRound className="w-5 h-5" />}
-              </button>
+            {/* Admin/Commish controls */}
+            <div className="flex items-center gap-1.5 sm:gap-3 flex-shrink-0">
+              {isCommissioner && (
+                <button onClick={toggleDraftStatus} className={`flex items-center gap-1.5 px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg font-semibold text-xs sm:text-sm transition ${isDraftActive ? 'bg-amber-600/20 text-amber-300 border border-amber-500' : 'bg-emerald-600 text-white'}`}>
+                  {isDraftActive ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />} {isDraftActive ? 'Pause' : 'Start'}
+                </button>
+              )}
+              <button onClick={handleDownloadBoard} className="p-1.5 sm:p-2 rounded-lg bg-slate-800 text-slate-300 hover:text-white transition"><Camera className="w-4 h-4 sm:w-5 sm:h-5" /></button>
+              <button onClick={toggleMute} className="p-1.5 sm:p-2 rounded-lg bg-slate-800 text-slate-300 hover:text-white transition">{isMuted ? <VolumeX className="w-4 h-4 sm:w-5 sm:h-5" /> : <Volume2 className="w-4 h-4 sm:w-5 sm:h-5" />}</button>
+              <button onClick={toggleCommishPanel} className="p-1.5 sm:p-2 rounded-lg bg-slate-800 text-slate-300 hover:text-white transition"><Settings className="w-4 h-4 sm:w-5 sm:h-5" /></button>
+              <button onClick={() => setShowLoginModal(true)} className="hidden lg:block p-1.5 sm:p-2 rounded-lg bg-slate-800 text-slate-300 hover:text-white transition"><UserCheck className="w-4 h-4 sm:w-5 sm:h-5" /></button>
             </div>
           </div>
         </div>
@@ -1339,17 +1249,10 @@ export default function FantasyDraftApp() {
                   ))}
                 </select>
               </div>
-
               <label className="flex items-center gap-2 mt-2 cursor-pointer border-t border-slate-800 pt-4">
-                <input
-                  type="checkbox"
-                  checked={assignModal.isKeeper}
-                  onChange={(e) => setAssignModal({ ...assignModal, isKeeper: e.target.checked })}
-                  className="w-4 h-4 rounded border-slate-700 bg-slate-950 text-amber-500"
-                />
+                <input type="checkbox" checked={assignModal.isKeeper} onChange={(e) => setAssignModal({ ...assignModal, isKeeper: e.target.checked })} className="w-4 h-4 rounded border-slate-700 bg-slate-950 text-amber-500" />
                 <span className="text-xs font-bold text-slate-300">Mark as Keeper (adds yellow 'K' badge)</span>
               </label>
-
             </div>
             <div className="flex gap-2 p-4 bg-slate-950/50 border-t border-slate-800">
               <button onClick={() => setAssignModal({ ...assignModal, isOpen: false })} className="flex-1 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-bold text-sm rounded-lg transition">Cancel</button>
@@ -1361,38 +1264,27 @@ export default function FantasyDraftApp() {
 
       {/* Commish Tools & Settings */}
       {isCommissioner && showCommishTools && (
-        <div className="bg-slate-900 border-b border-blue-500/30 p-6 space-y-6 shadow-xl relative z-20">
+        <div className="bg-slate-900 border-b border-blue-500/30 p-4 sm:p-6 space-y-6 shadow-xl relative z-20">
           <div className="w-full mx-auto grid grid-cols-1 lg:grid-cols-2 gap-8">
-
-            {/* Quick Actions */}
             <div className="space-y-4">
               <h3 className="text-sm font-bold text-blue-400 flex items-center gap-2 uppercase"><ShieldAlert className="w-4 h-4" /> Commish Actions</h3>
-              <div className="flex flex-wrap items-center gap-3">
-                <button onClick={handleResetDraft} className="flex items-center gap-1.5 px-4 py-2 bg-red-600/20 text-red-400 border border-red-500/30 hover:bg-red-600 hover:text-white rounded-lg transition text-sm font-semibold"><Trash2 className="w-4 h-4" /> Reset Draft</button>
-                <button onClick={handleUndoPick} className="flex items-center gap-1.5 px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg transition text-sm font-semibold"><RotateCcw className="w-4 h-4 text-amber-400" /> Undo Last Pick</button>
-                <button onClick={handleExportCSV} className="flex items-center gap-1.5 px-4 py-2 bg-blue-600/20 text-blue-400 border border-blue-500/30 hover:bg-blue-600 hover:text-white rounded-lg transition text-sm font-semibold"><Download className="w-4 h-4" /> Export CSV</button>
+              <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+                <button onClick={handleResetDraft} className="flex items-center gap-1.5 px-3 py-1.5 sm:px-4 sm:py-2 bg-red-600/20 text-red-400 border border-red-500/30 hover:bg-red-600 hover:text-white rounded-lg transition text-xs sm:text-sm font-semibold"><Trash2 className="w-4 h-4" /> Reset Draft</button>
+                <button onClick={handleUndoPick} className="flex items-center gap-1.5 px-3 py-1.5 sm:px-4 sm:py-2 bg-slate-800 hover:bg-slate-700 rounded-lg transition text-xs sm:text-sm font-semibold"><RotateCcw className="w-4 h-4 text-amber-400" /> Undo Last Pick</button>
+                <button onClick={handleExportCSV} className="flex items-center gap-1.5 px-3 py-1.5 sm:px-4 sm:py-2 bg-blue-600/20 text-blue-400 border border-blue-500/30 hover:bg-blue-600 hover:text-white rounded-lg transition text-xs sm:text-sm font-semibold"><Download className="w-4 h-4" /> Export CSV</button>
               </div>
 
               {/* LIVE TIMER CONTROLS */}
-              <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
+              <div className="bg-slate-950 p-3 sm:p-4 rounded-xl border border-slate-800">
                 <h4 className="text-xs font-bold text-blue-400 uppercase flex items-center gap-2 mb-3"><Clock className="w-3.5 h-3.5" /> Live Timer Controls</h4>
-                <div className="flex flex-wrap items-end gap-4">
+                <div className="flex flex-wrap items-end gap-3 sm:gap-4">
                   <div>
                     <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Default (Secs)</label>
-                    <input
-                      type="number"
-                      value={defaultPickTime}
-                      onChange={(e) => {
-                        const newTime = Number(e.target.value);
-                        setDefaultPickTime(newTime);
-                        set(ref(db, 'draftState/defaultPickTime'), newTime);
-                      }}
-                      className="w-20 bg-slate-900 border border-slate-700 px-3 py-1.5 rounded-lg text-sm text-white outline-none focus:border-blue-500"
-                    />
+                    <input type="number" value={defaultPickTime} onChange={(e) => { const newTime = Number(e.target.value); setDefaultPickTime(newTime); set(ref(db, 'draftState/defaultPickTime'), newTime); }} className="w-16 sm:w-20 bg-slate-900 border border-slate-700 px-2 sm:px-3 py-1.5 rounded-lg text-sm text-white outline-none focus:border-blue-500" />
                   </div>
                   <div className="flex-1">
                     <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Adjust Current Clock</label>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
                       <button onClick={() => setClockTime(prev => prev + 15)} className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-xs font-bold rounded-lg transition text-slate-300">+15s</button>
                       <button onClick={() => setClockTime(prev => Math.max(0, prev - 15))} className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-xs font-bold rounded-lg transition text-slate-300">-15s</button>
                       <button onClick={() => setClockTime(defaultPickTime)} className="px-3 py-1.5 bg-blue-600/20 text-blue-400 hover:bg-blue-600 hover:text-white border border-blue-500/30 text-xs font-bold rounded-lg transition">Reset Current</button>
@@ -1415,36 +1307,18 @@ export default function FantasyDraftApp() {
                         <div className="flex items-center justify-between">
                           <span className="text-[10px] font-bold text-slate-500">{idx + 1}.</span>
                           <div className="flex items-center gap-1.5">
-                            {/* Dues Toggle */}
-                            <button
-                              onClick={() => togglePaidStatus(team.id)}
-                              className={`text-[9px] font-black px-2 py-0.5 rounded transition ${isPaid ? 'bg-emerald-600 text-white hover:bg-emerald-500' : 'bg-amber-500/20 text-amber-400 border border-amber-500/30 hover:bg-amber-500 hover:text-white'}`}
-                            >
+                            <button onClick={() => togglePaidStatus(team.id)} className={`text-[9px] font-black px-2 py-0.5 rounded transition ${isPaid ? 'bg-emerald-600 text-white hover:bg-emerald-500' : 'bg-amber-500/20 text-amber-400 border border-amber-500/30 hover:bg-amber-500 hover:text-white'}`}>
                               {isPaid ? '$25 Paid ✅' : 'Unpaid ❌'}
                             </button>
-
-                            {teamPins[team.id] ? (
-                              <button onClick={() => set(ref(db, `draftState/teamPins/${team.id}`), null)} className="text-[9px] text-red-400 hover:text-red-300 font-bold bg-red-950/50 px-1.5 py-0.5 rounded">Reset PIN</button>
-                            ) : null}
+                            {teamPins[team.id] ? <button onClick={() => set(ref(db, `draftState/teamPins/${team.id}`), null)} className="text-[9px] text-red-400 hover:text-red-300 font-bold bg-red-950/50 px-1.5 py-0.5 rounded">Reset PIN</button> : null}
                           </div>
                         </div>
-                        <input
-                          type="text"
-                          value={team.name}
-                          onChange={(e) => updateTempTeamName(idx, e.target.value)}
-                          className="w-full bg-transparent text-xs text-white outline-none border-b border-slate-800 focus:border-blue-500 pb-0.5"
-                        />
+                        <input type="text" value={team.name} onChange={(e) => updateTempTeamName(idx, e.target.value)} className="w-full bg-transparent text-xs text-white outline-none border-b border-slate-800 focus:border-blue-500 pb-0.5" />
                       </div>
                     );
                   })}
                 </div>
-                <button
-                  onClick={() => {
-                    set(ref(db, 'draftState/teams'), tempTeams);
-                    alert("Team names synced to live board!");
-                  }}
-                  className="w-full mt-3 bg-blue-600/20 text-blue-400 border border-blue-500/30 hover:bg-blue-600 hover:text-white text-xs font-bold py-2 rounded-lg transition"
-                >
+                <button onClick={() => { set(ref(db, 'draftState/teams'), tempTeams); alert("Team names synced to live board!"); }} className="w-full mt-3 bg-blue-600/20 text-blue-400 border border-blue-500/30 hover:bg-blue-600 hover:text-white text-xs font-bold py-2 rounded-lg transition">
                   Quick Save Name Changes (No Reset)
                 </button>
               </div>
@@ -1459,7 +1333,7 @@ export default function FantasyDraftApp() {
                 </button>
               </div>
 
-              <div className="flex items-center gap-4 mb-6">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 mb-6">
                 <div className="flex-1">
                   <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Number of Teams</label>
                   <input type="number" value={tempTeams.length} onChange={(e) => updateTempTeamCount(Number(e.target.value))} min={2} max={32} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500" />
@@ -1472,13 +1346,9 @@ export default function FantasyDraftApp() {
 
               {/* Round-by-Round Customizer */}
               <div className="flex-1 border-t border-slate-800 pt-4 flex flex-col">
-                <div className="flex items-center justify-between mb-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
                   <label className="block text-[10px] uppercase font-bold text-slate-500">Round-by-Round Editor</label>
-                  <select
-                    value={editingRound}
-                    onChange={(e) => setEditingRound(Number(e.target.value))}
-                    className="bg-slate-900 border border-slate-700 text-white text-xs py-1 px-2 rounded outline-none"
-                  >
+                  <select value={editingRound} onChange={(e) => setEditingRound(Number(e.target.value))} className="bg-slate-900 border border-slate-700 text-white text-xs py-1.5 sm:py-1 px-2 rounded outline-none w-full sm:w-auto">
                     {Array.from({ length: tempRounds }).map((_, i) => (
                       <option key={i} value={i + 1}>Edit Round {i + 1}</option>
                     ))}
@@ -1487,7 +1357,7 @@ export default function FantasyDraftApp() {
 
                 <div className="flex items-center gap-2 mb-3">
                   <button onClick={handleCopyPrevRound} disabled={editingRound === 1} className="flex-1 flex justify-center items-center gap-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-md py-1.5 text-xs text-slate-300 disabled:opacity-50 disabled:cursor-not-allowed transition">
-                    <Copy className="w-3.5 h-3.5" /> Copy Prev Round
+                    <Copy className="w-3.5 h-3.5" /> Copy Prev
                   </button>
                   <button onClick={handleReverseCurrentRound} className="flex-1 flex justify-center items-center gap-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-md py-1.5 text-xs text-slate-300 transition">
                     <ArrowRightLeft className="w-3.5 h-3.5" /> Reverse Order
@@ -1498,45 +1368,30 @@ export default function FantasyDraftApp() {
                   {customOrder[editingRound - 1]?.map((teamId, slotIdx) => (
                     <div key={slotIdx} className="flex flex-col gap-1 bg-slate-900 p-2 rounded-lg border border-slate-800">
                       <span className="text-[9px] font-bold text-slate-500 uppercase">Pick {slotIdx + 1}</span>
-                      <select
-                        value={teamId}
-                        onChange={(e) => updateCustomOrderSlot(editingRound - 1, slotIdx, Number(e.target.value))}
-                        className="bg-slate-950 border border-slate-800 text-white text-xs py-1 px-1.5 rounded outline-none w-full"
-                      >
-                        {tempTeams.map(t => (
-                          <option key={t.id} value={t.id}>{t.name}</option>
-                        ))}
+                      <select value={teamId} onChange={(e) => updateCustomOrderSlot(editingRound - 1, slotIdx, Number(e.target.value))} className="bg-slate-950 border border-slate-800 text-white text-xs py-1 px-1.5 rounded outline-none w-full">
+                        {tempTeams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
                       </select>
                     </div>
                   ))}
                 </div>
               </div>
-
             </div>
           </div>
         </div>
       )}
 
-      {/* Main Board - FULL WIDTH EDGE TO EDGE */}
-      <div className="flex-1 w-full px-2 sm:px-4 pb-4 pt-2 flex flex-col relative h-[calc(100vh-110px)] overflow-hidden">
+      {/* Main Board - SWIPEABLE ON MOBILE, EDGE TO EDGE ON TV */}
+      <div className="flex-1 w-full px-1 sm:px-4 pb-4 pt-1 sm:pt-2 flex flex-col relative h-[calc(100vh-140px)] sm:h-[calc(100vh-110px)] overflow-hidden">
 
         {/* Roster Modal Overlay */}
         {viewingTeam && (
           <div className="absolute inset-0 z-40 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 rounded-2xl">
             <div className="bg-slate-900 border border-slate-700 rounded-xl w-full max-w-md shadow-2xl flex flex-col max-h-[90%]">
               <div className="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-950 rounded-t-xl">
-
                 {isEditingName ? (
                   <div className="flex items-center gap-2 flex-1 mr-4">
                     <Users className="w-5 h-5 text-blue-400" />
-                    <input
-                      type="text"
-                      value={editNameValue}
-                      onChange={(e) => setEditNameValue(e.target.value)}
-                      className="bg-slate-900 border border-slate-700 text-white px-2 py-1 rounded text-sm font-bold outline-none flex-1 focus:border-blue-500"
-                      autoFocus
-                      onKeyDown={(e) => e.key === 'Enter' && handleSaveTeamName()}
-                    />
+                    <input type="text" value={editNameValue} onChange={(e) => setEditNameValue(e.target.value)} className="bg-slate-900 border border-slate-700 text-white px-2 py-1 rounded text-sm font-bold outline-none flex-1 focus:border-blue-500" autoFocus onKeyDown={(e) => e.key === 'Enter' && handleSaveTeamName()} />
                     <button onClick={handleSaveTeamName} className="bg-emerald-600 hover:bg-emerald-500 text-white px-2 py-1 rounded text-xs font-bold transition">Save</button>
                     <button onClick={() => setIsEditingName(false)} className="bg-slate-800 hover:bg-slate-700 text-white px-2 py-1 rounded text-xs font-bold transition">Cancel</button>
                   </div>
@@ -1550,7 +1405,6 @@ export default function FantasyDraftApp() {
                     )}
                   </h3>
                 )}
-
                 {!isEditingName && (
                   <button onClick={() => setViewingTeam(null)} className="p-1 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white transition">
                     <X className="w-5 h-5" />
@@ -1601,15 +1455,18 @@ export default function FantasyDraftApp() {
           </div>
         )}
 
-        <div className="flex-1 min-w-0 bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col h-full overflow-hidden">
+        <div className="flex-1 min-w-0 bg-slate-900 border border-slate-800 rounded-xl sm:rounded-2xl p-2 sm:p-4 flex flex-col h-full overflow-hidden shadow-2xl">
+
+          {/* HORIZONTAL SCROLL ENABLED HERE */}
           <div className="flex-1 overflow-x-auto overflow-y-auto">
 
-            <div ref={boardRef} className="inline-block pb-8 w-full bg-slate-900 p-2" style={{ minWidth: `${50 + (teams.length * 120)}px` }}>
+            {/* THE SQUISH FIX: min-w-full with inline-block enables scroll on mobile but stretches cleanly to edges on TV */}
+            <div ref={boardRef} className="inline-block pb-8 min-w-full bg-slate-900 p-1 sm:p-2" style={{ minWidth: `${48 + (teams.length * 110)}px` }}>
 
               {/* Header Row */}
               <div
-                className="grid gap-2 sticky top-0 bg-slate-900 z-20 pb-2 border-b border-slate-800"
-                style={{ gridTemplateColumns: `48px repeat(${teams.length}, minmax(120px, 1fr))` }}
+                className="grid gap-1.5 sm:gap-2 sticky top-0 bg-slate-900 z-20 pb-2 border-b border-slate-800"
+                style={{ gridTemplateColumns: `48px repeat(${teams.length}, 1fr)` }}
               >
                 <div className="sticky left-0 bg-slate-900 z-30 flex items-center justify-center border-r border-slate-800/50">
                   <span className="text-[10px] font-bold text-slate-500/50">RND</span>
@@ -1619,15 +1476,15 @@ export default function FantasyDraftApp() {
                   <button
                     key={team.id}
                     onClick={() => setViewingTeam(team)}
-                    className="bg-slate-950 border border-slate-800 hover:border-blue-500 hover:bg-slate-800 transition rounded-lg p-2 text-center cursor-pointer group min-h-[44px] flex items-center justify-center"
+                    className="bg-slate-950 border border-slate-800 hover:border-blue-500 hover:bg-slate-800 transition rounded-lg p-2 text-center cursor-pointer group min-h-[44px] flex items-center justify-center shadow-sm"
                   >
-                    <div className="text-xs font-black text-white group-hover:text-blue-400 leading-tight uppercase line-clamp-2">{team.name}</div>
+                    <div className="text-[10px] sm:text-xs font-black text-white group-hover:text-blue-400 leading-tight uppercase line-clamp-2">{team.name}</div>
                   </button>
                 ))}
               </div>
 
               {/* Draft Rounds */}
-              <div className="space-y-2 mt-2">
+              <div className="space-y-1.5 sm:space-y-2 mt-2">
                 {Array.from({ length: totalRounds }).map((_, rIdx) => {
                   const rNum = rIdx + 1;
                   const roundPicks = picks.filter((p) => p.round === rNum);
@@ -1635,11 +1492,11 @@ export default function FantasyDraftApp() {
                   return (
                     <div
                       key={rNum}
-                      className="grid gap-2 items-stretch relative"
-                      style={{ gridTemplateColumns: `48px repeat(${teams.length}, minmax(120px, 1fr))` }}
+                      className="grid gap-1.5 sm:gap-2 items-stretch relative"
+                      style={{ gridTemplateColumns: `48px repeat(${teams.length}, 1fr)` }}
                     >
                       {/* Sticky Round Number Column */}
-                      <div className="sticky left-0 z-10 bg-slate-900/90 backdrop-blur-md flex items-center justify-center h-full min-h-[90px] border border-slate-800 rounded-lg shadow-[4px_0_15px_-3px_rgba(0,0,0,0.3)]">
+                      <div className="sticky left-0 z-10 bg-slate-900/90 backdrop-blur-md flex items-center justify-center h-full min-h-[80px] sm:min-h-[90px] border border-slate-800 rounded-lg shadow-[4px_0_15px_-3px_rgba(0,0,0,0.3)]">
                         <span className="text-sm font-black text-slate-400">{rNum}</span>
                       </div>
 
@@ -1649,13 +1506,13 @@ export default function FantasyDraftApp() {
 
                         if (teamPicksThisRound.length === 0) {
                           return (
-                            <div key={`empty-${team.id}-${rNum}`} className="h-full min-h-[90px] bg-slate-900/40 border border-slate-800/30 rounded-lg flex items-center justify-center">
+                            <div key={`empty-${team.id}-${rNum}`} className="h-full min-h-[80px] sm:min-h-[90px] bg-slate-900/40 border border-slate-800/30 rounded-lg flex items-center justify-center">
                             </div>
                           );
                         }
 
                         return (
-                          <div key={team.id} className="flex flex-col gap-2 h-full">
+                          <div key={team.id} className="flex flex-col gap-1.5 sm:gap-2 h-full">
                             {teamPicksThisRound.map((pick) => {
                               const pickIndex = picks.findIndex(p => p.pickNumber === pick.pickNumber);
                               const isCurrent = pickIndex === currentPickIndex;
@@ -1666,21 +1523,21 @@ export default function FantasyDraftApp() {
                               const split = enriched ? getSplitName(enriched.name) : null;
 
                               return (
-                                <div key={pick.pickNumber} className={`h-[90px] rounded-lg p-2 flex flex-col justify-between border relative ${isCurrent ? 'border-amber-400 bg-amber-500/10 ring-2 ring-amber-400/30 animate-pulse' : isSkipped ? 'border-red-500/50 bg-red-950/30 ring-1 ring-red-500/50' : enriched ? `${posStyle?.bg} ${posStyle?.border}` : 'bg-slate-950/50 border-slate-800/80'}`}>
+                                <div key={pick.pickNumber} className={`h-[80px] sm:h-[90px] rounded-lg p-1.5 sm:p-2 flex flex-col justify-between border relative shadow-sm ${isCurrent ? 'border-amber-400 bg-amber-500/10 ring-2 ring-amber-400/30 animate-pulse' : isSkipped ? 'border-red-500/50 bg-red-950/30 ring-1 ring-red-500/50' : enriched ? `${posStyle?.bg} ${posStyle?.border}` : 'bg-slate-950/50 border-slate-800/80'}`}>
                                   {pick.isKeeper && (
-                                    <div className="absolute -top-2 -right-2 bg-amber-500 text-slate-950 text-[10px] font-black w-5 h-5 flex items-center justify-center rounded-full shadow-lg">K</div>
+                                    <div className="absolute -top-2 -right-2 bg-amber-500 text-slate-950 text-[9px] sm:text-[10px] font-black w-4 h-4 sm:w-5 sm:h-5 flex items-center justify-center rounded-full shadow-lg">K</div>
                                   )}
 
                                   {/* Top Bar: Position & NFL Team / Pick # */}
-                                  <div className="flex justify-between items-center text-[10px]">
+                                  <div className="flex justify-between items-center text-[9px] sm:text-[10px]">
                                     {enriched ? (
-                                      <span className={`px-1.5 py-0.5 rounded font-bold text-[9px] ${posStyle?.badge}`}>{enriched.position}</span>
+                                      <span className={`px-1 sm:px-1.5 py-0.5 rounded font-bold text-[8px] sm:text-[9px] ${posStyle?.badge}`}>{enriched.position}</span>
                                     ) : (
                                       <span className="text-slate-500 font-medium">#{pick.pickNumber}</span>
                                     )}
 
                                     {enriched && (
-                                      <span className="text-white/70 font-bold text-[10px] uppercase">
+                                      <span className="text-white/70 font-bold text-[9px] sm:text-[10px] uppercase">
                                         {enriched.team}
                                       </span>
                                     )}
@@ -1688,20 +1545,20 @@ export default function FantasyDraftApp() {
 
                                   {/* First Name stacked over BOLD Last Name */}
                                   {enriched && split ? (
-                                    <div className="my-auto text-center leading-none">
-                                      <div className="text-xs font-semibold text-slate-200 truncate tracking-tight mb-0.5">{split.firstName}</div>
-                                      <div className={`text-sm sm:text-base font-black tracking-tight truncate uppercase leading-tight ${posStyle?.text}`}>{split.lastName}</div>
+                                    <div className="my-auto text-center leading-none px-0.5">
+                                      <div className="text-[9px] sm:text-xs font-semibold text-slate-200 truncate tracking-tight mb-0.5">{split.firstName}</div>
+                                      <div className={`text-[11px] sm:text-sm font-black tracking-tight truncate uppercase leading-tight ${posStyle?.text}`}>{split.lastName}</div>
                                     </div>
                                   ) : (
-                                    <div className="text-xs text-slate-700 font-semibold text-center my-auto">Empty</div>
+                                    <div className="text-[10px] sm:text-xs text-slate-700 font-semibold text-center my-auto">Empty</div>
                                   )}
 
                                   {/* Bottom Row - BYE WEEK */}
                                   {enriched && (
-                                    <div className="flex justify-between items-center text-[9px] text-white/60 font-medium border-t border-white/10 pt-1">
+                                    <div className="flex justify-between items-center text-[8px] sm:text-[9px] text-white/60 font-medium border-t border-white/10 pt-1 mt-1">
                                       <span>#{pick.pickNumber}</span>
                                       {enriched.bye && (
-                                        <span className="text-white font-black bg-black/40 border border-white/10 px-1.5 py-[1px] rounded text-[8px] leading-none">
+                                        <span className="text-white font-black bg-black/40 border border-white/10 px-1.5 py-[1px] rounded text-[7px] sm:text-[8px] leading-none">
                                           BYE {enriched.bye}
                                         </span>
                                       )}
