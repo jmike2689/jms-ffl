@@ -104,6 +104,10 @@ export default function FantasyDraftApp() {
   const [isDraftActive, setIsDraftActive] = useState<boolean>(false);
   const [draftMode, setDraftMode] = useState<'live' | 'mock'>('live');
 
+  // --- UI Layout State ---
+  const [isPlayersOpen, setIsPlayersOpen] = useState<boolean>(false);
+  const [isChatOpen, setIsChatOpen] = useState<boolean>(false);
+
   // --- User Identity State ---
   const [userTeamId, setUserTeamId] = useState<number | null>(null);
   const [showLoginModal, setShowLoginModal] = useState<boolean>(false);
@@ -187,9 +191,7 @@ export default function FantasyDraftApp() {
         pixelRatio: 2,
         width: boardRef.current.scrollWidth,
         height: boardRef.current.scrollHeight,
-        style: {
-          transform: 'none',
-        }
+        style: { transform: 'none' }
       });
       const link = document.createElement('a');
       link.href = dataUrl;
@@ -272,7 +274,7 @@ export default function FantasyDraftApp() {
   // Auto-scroll chat to bottom
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages, isChatOpen]);
 
   // Sync editing name value when roster modal opens
   useEffect(() => {
@@ -466,6 +468,9 @@ export default function FantasyDraftApp() {
       updateFirebaseState(updatedPicks, nextIndex, isDraftActive);
       setClockTime(defaultPickTime);
     }
+
+    // Auto-close the player drawer after a successful pick
+    setIsPlayersOpen(false);
   };
 
   const handleAutoPick = () => { if (availablePlayers.length > 0) handleSelectPlayer(availablePlayers[0]); };
@@ -495,6 +500,7 @@ export default function FantasyDraftApp() {
       };
       set(ref(db, 'draftState/picks'), updatedPicks);
       setAssignModal({ ...assignModal, isOpen: false });
+      setIsPlayersOpen(false);
     }
   };
 
@@ -1031,7 +1037,7 @@ export default function FantasyDraftApp() {
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col overflow-x-hidden">
       {/* Header */}
       <header className="bg-slate-900 border-b border-slate-800 px-4 py-3 sticky top-0 z-30">
-        <div className="w-full max-w-[2400px] mx-auto flex flex-wrap items-center justify-between gap-4">
+        <div className="w-full mx-auto flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-blue-600 rounded-lg text-white"><Trophy className="w-6 h-6" /></div>
             <div>
@@ -1045,19 +1051,38 @@ export default function FantasyDraftApp() {
             </div>
           </div>
 
-          {/* PANIC CLOCK UI */}
-          <div className={`flex items-center gap-6 rounded-xl px-4 py-2 border transition-all ${clockTime <= 10 && isDraftActive ? 'bg-red-950 border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.4)]' : 'bg-slate-950 border-slate-800'}`}>
-            <div className="flex items-center gap-2">
-              <Clock className={`w-5 h-5 ${clockTime <= 10 && isDraftActive ? 'text-red-500 animate-pulse' : 'text-blue-400'}`} />
-              <span className={`text-2xl font-mono font-bold ${clockTime <= 10 && isDraftActive ? 'text-red-500' : 'text-white'}`}>
-                {Math.floor(clockTime / 60)}:{(clockTime % 60).toString().padStart(2, '0')}
-              </span>
+          <div className="flex items-center gap-4">
+
+            {/* NEW SLIDE-OVER PANEL BUTTONS */}
+            <div className="flex items-center gap-2 bg-slate-950 p-1.5 rounded-xl border border-slate-800">
+              <button
+                onClick={() => setIsPlayersOpen(true)}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-sm font-bold text-white transition shadow-sm"
+              >
+                <Search className="w-4 h-4 text-blue-400" /> Draft Pool
+              </button>
+              <button
+                onClick={() => setIsChatOpen(true)}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-sm font-bold text-white transition shadow-sm"
+              >
+                <MessageSquare className="w-4 h-4 text-emerald-400" /> League Chat
+              </button>
             </div>
-            <div className={`h-8 w-[1px] ${clockTime <= 10 && isDraftActive ? 'bg-red-500/30' : 'bg-slate-800'}`} />
-            <div>
-              <div className="text-[10px] text-slate-400 uppercase font-bold">On The Clock</div>
-              <div className={`text-sm font-bold ${clockTime <= 10 && isDraftActive ? 'text-red-400' : 'text-blue-400'}`}>
-                {currentPick ? `Pick #${currentPick.pickNumber} (R${currentPick.round}) - ${currentPickingTeam?.name}` : 'Draft Complete!'}
+
+            {/* PANIC CLOCK UI */}
+            <div className={`flex items-center gap-6 rounded-xl px-4 py-2 border transition-all ${clockTime <= 10 && isDraftActive ? 'bg-red-950 border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.4)]' : 'bg-slate-950 border-slate-800'}`}>
+              <div className="flex items-center gap-2">
+                <Clock className={`w-5 h-5 ${clockTime <= 10 && isDraftActive ? 'text-red-500 animate-pulse' : 'text-blue-400'}`} />
+                <span className={`text-2xl font-mono font-bold ${clockTime <= 10 && isDraftActive ? 'text-red-500' : 'text-white'}`}>
+                  {Math.floor(clockTime / 60)}:{(clockTime % 60).toString().padStart(2, '0')}
+                </span>
+              </div>
+              <div className={`h-8 w-[1px] ${clockTime <= 10 && isDraftActive ? 'bg-red-500/30' : 'bg-slate-800'}`} />
+              <div>
+                <div className="text-[10px] text-slate-400 uppercase font-bold">On The Clock</div>
+                <div className={`text-sm font-bold ${clockTime <= 10 && isDraftActive ? 'text-red-400' : 'text-blue-400'}`}>
+                  {currentPick ? `Pick #${currentPick.pickNumber} (R${currentPick.round}) - ${currentPickingTeam?.name}` : 'Draft Complete!'}
+                </div>
               </div>
             </div>
           </div>
@@ -1095,7 +1120,6 @@ export default function FantasyDraftApp() {
 
             <div className="flex items-center gap-1">
 
-              {/* Camera Snapshot Button */}
               <button
                 onClick={handleDownloadBoard}
                 disabled={isCapturing}
@@ -1121,7 +1145,6 @@ export default function FantasyDraftApp() {
                 {isMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
               </button>
 
-              {/* Commissioner Unlock / Gear Button */}
               <button
                 onClick={toggleCommishPanel}
                 title={isCommissioner ? "Commissioner Tools" : "Unlock Commissioner Access"}
@@ -1137,6 +1160,147 @@ export default function FantasyDraftApp() {
       {renderCommishAuthModal()}
       {renderLoginModal()}
       {renderBylawsModal()}
+
+      {/* --- PLAYERS DRAWER OVERLAY --- */}
+      {isPlayersOpen && (
+        <div className="fixed inset-0 z-50 flex justify-start">
+          <div className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm" onClick={() => setIsPlayersOpen(false)} />
+          <div className="relative w-full max-w-md bg-slate-900 border-r border-slate-700 shadow-2xl flex flex-col h-full animate-in slide-in-from-left duration-200">
+            <div className="p-4 border-b border-slate-800 bg-slate-950 flex justify-between items-center">
+              <h2 className="font-bold text-base flex items-center gap-2"><Users className="w-5 h-5 text-blue-400" /> Available Players</h2>
+              <button onClick={() => setIsPlayersOpen(false)} className="p-1.5 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white transition">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-4 border-b border-slate-800 space-y-3">
+              <div className="relative">
+                <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-500" />
+                <input type="text" placeholder="Search player..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-3 py-2 text-sm text-white focus:border-blue-500 outline-none" />
+              </div>
+
+              <div className="flex items-center gap-2 bg-slate-950 px-3 py-2 rounded-xl border border-slate-800 overflow-x-auto">
+                <span className="text-[9px] uppercase font-black text-slate-500 whitespace-nowrap">Last 10 Picks:</span>
+                {Object.keys(recentPositions).length === 0 ? (
+                  <span className="text-[10px] text-slate-600 font-bold italic">No picks yet</span>
+                ) : (
+                  ['QB', 'RB', 'WR', 'TE', 'K', 'DEF'].map(pos => {
+                    const count = recentPositions[pos];
+                    if (!count) return null;
+                    return (
+                      <span key={pos} className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${count >= 3 ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-slate-800 text-slate-300'}`}>
+                        {count} {pos}
+                      </span>
+                    )
+                  })
+                )}
+              </div>
+
+              <div className="flex gap-1 overflow-x-auto pb-1">
+                {['ALL', 'QB', 'RB', 'WR', 'TE', 'K', 'DEF'].map((pos) => (
+                  <button key={pos} onClick={() => setSelectedPos(pos)} className={`px-3 py-1 rounded-lg text-xs font-bold ${selectedPos === pos ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400'}`}>{pos}</button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto divide-y divide-slate-800/50 p-2">
+              {availablePlayers.map((player) => (
+                <div key={player.id} className="flex items-center justify-between p-2.5 hover:bg-slate-800/50 rounded-xl group">
+                  <div className="flex items-center gap-3">
+                    <span className={`px-2 py-1 rounded-md font-bold text-xs ${POSITION_COLORS[player.position]?.badge}`}>{player.position}</span>
+                    <div>
+                      <div className="font-bold text-sm text-white flex items-center gap-1.5">
+                        {player.name}
+                        {player.injury_status && (
+                          <span className={`px-1 py-[1px] rounded-[4px] text-[8px] font-black uppercase leading-none border ${['Out', 'IR', 'PUP', 'Sus', 'Suspended'].includes(player.injury_status) ? 'bg-red-950/80 text-red-500 border-red-500/50' :
+                              player.injury_status === 'Doubtful' ? 'bg-orange-950/80 text-orange-500 border-orange-500/50' :
+                                'bg-amber-950/80 text-amber-500 border-amber-500/50'
+                            }`}>
+                            {player.injury_status === 'Questionable' ? 'Q' : player.injury_status === 'Doubtful' ? 'D' : player.injury_status === 'Suspended' ? 'SUS' : player.injury_status}
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-xs text-slate-400 font-bold uppercase flex items-center gap-1.5 mt-0.5">
+                        {player.team}
+                        {player.bye && <span className="text-[8px] bg-slate-800/80 px-1 py-[1px] rounded">BYE {player.bye}</span>}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {isCommissioner && showCommishTools && (
+                      <button
+                        onClick={() => {
+                          const firstPick = picks.find(p => p.teamId === (teams[0]?.id || 1));
+                          setAssignModal({ isOpen: true, player, teamId: teams[0]?.id || 1, pickNumber: firstPick?.pickNumber || 1, isKeeper: false });
+                        }}
+                        className="px-2 py-1.5 rounded-lg text-[10px] font-bold bg-amber-600/20 text-amber-500 border border-amber-500/30 hover:bg-amber-600 hover:text-white transition uppercase"
+                      >
+                        Assign
+                      </button>
+                    )}
+                    <button
+                      onClick={() => handleSelectPlayer(player)}
+                      disabled={!isDraftActive || (!isCommissioner && !isMyTurnOrSkipped)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold ${!isDraftActive || (!isCommissioner && !isMyTurnOrSkipped) ? 'bg-slate-800 text-slate-600' : 'bg-blue-600 text-white'}`}
+                    >
+                      Draft
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- CHAT DRAWER OVERLAY --- */}
+      {isChatOpen && (
+        <div className="fixed inset-0 z-50 flex justify-end">
+          <div className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm" onClick={() => setIsChatOpen(false)} />
+          <div className="relative w-full max-w-md bg-slate-900 border-l border-slate-700 shadow-2xl flex flex-col h-full animate-in slide-in-from-right duration-200">
+            <div className="p-4 border-b border-slate-800 bg-slate-950 flex justify-between items-center">
+              <h2 className="font-bold text-base flex items-center gap-2"><MessageSquare className="w-5 h-5 text-blue-400" /> Live Draft Chat</h2>
+              <button onClick={() => setIsChatOpen(false)} className="p-1.5 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white transition">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              {messages.length === 0 ? (
+                <div className="flex items-center justify-center h-full text-sm text-slate-500 italic">No messages yet. Start the trash talk!</div>
+              ) : (
+                messages.map(msg => {
+                  const isMe = msg.teamId === userTeamId;
+                  const senderTeamName = teams.find(t => t.id === msg.teamId)?.name || 'Unknown Team';
+                  return (
+                    <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
+                      <span className="text-[10px] text-slate-500 mb-1">{senderTeamName}</span>
+                      <div className={`px-4 py-2.5 text-sm max-w-[85%] ${isMe ? 'bg-blue-600 text-white rounded-2xl rounded-tr-sm' : 'bg-slate-800 text-slate-200 rounded-2xl rounded-tl-sm'}`}>
+                        {msg.text}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+              <div ref={chatEndRef} />
+            </div>
+
+            <form onSubmit={handleSendMessage} className="p-3 border-t border-slate-800 bg-slate-950 flex gap-2">
+              <input
+                type="text"
+                value={newMessage}
+                onChange={(e) => setNewMessage(e.target.value)}
+                placeholder={userTeamId === null ? "Log in to chat..." : "Message the league..."}
+                disabled={userTeamId === null}
+                className="flex-1 bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white outline-none focus:border-blue-500 disabled:opacity-50"
+              />
+              <button type="submit" disabled={!newMessage.trim() || userTeamId === null} className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-3 rounded-xl transition flex items-center justify-center">
+                <Send className="w-5 h-5" />
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Manual Assignment Modal */}
       {assignModal.isOpen && assignModal.player && (
@@ -1198,7 +1362,7 @@ export default function FantasyDraftApp() {
       {/* Commish Tools & Settings */}
       {isCommissioner && showCommishTools && (
         <div className="bg-slate-900 border-b border-blue-500/30 p-6 space-y-6 shadow-xl relative z-20">
-          <div className="w-full max-w-[2400px] mx-auto grid grid-cols-1 lg:grid-cols-2 gap-8">
+          <div className="w-full mx-auto grid grid-cols-1 lg:grid-cols-2 gap-8">
 
             {/* Quick Actions */}
             <div className="space-y-4">
@@ -1353,8 +1517,8 @@ export default function FantasyDraftApp() {
         </div>
       )}
 
-      {/* Main Board - SWAPPED TO FLEXBOX FOR FULL WIDTH */}
-      <div className="flex-1 w-full max-w-[2400px] mx-auto p-4 flex flex-col lg:flex-row gap-4 relative">
+      {/* Main Board - FULL WIDTH EDGE TO EDGE */}
+      <div className="flex-1 w-full px-2 sm:px-4 pb-4 pt-2 flex flex-col relative h-[calc(100vh-110px)] overflow-hidden">
 
         {/* Roster Modal Overlay */}
         {viewingTeam && (
@@ -1437,148 +1601,15 @@ export default function FantasyDraftApp() {
           </div>
         )}
 
-        {/* Sidebar (Players & Chat) - Fixed Width */}
-        <div className="w-full lg:w-[340px] xl:w-[380px] flex-shrink-0 flex flex-col gap-4 h-[780px] lg:h-[calc(100vh-110px)]">
-
-          {/* Players Panel (Top Half) */}
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl flex flex-col overflow-hidden flex-1">
-            <div className="p-4 border-b border-slate-800 space-y-3">
-              <div className="flex justify-between items-center">
-                <h2 className="font-bold text-sm flex items-center gap-2"><Users className="w-4 h-4 text-blue-400" /> Available Players</h2>
-                {isLoadingAPI ? <Loader2 className="w-4 h-4 text-slate-500 animate-spin" /> : <span className="text-xs text-slate-400">{availablePlayers.length} remaining</span>}
-              </div>
-              <div className="relative">
-                <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-500" />
-                <input type="text" placeholder="Search player..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-3 py-2 text-sm text-white focus:border-blue-500 outline-none" />
-              </div>
-
-              {/* POSITION RUN TRACKER */}
-              <div className="flex items-center gap-2 bg-slate-950 px-3 py-2 rounded-xl border border-slate-800 overflow-x-auto">
-                <span className="text-[9px] uppercase font-black text-slate-500 whitespace-nowrap">Last 10 Picks:</span>
-                {Object.keys(recentPositions).length === 0 ? (
-                  <span className="text-[10px] text-slate-600 font-bold italic">No picks yet</span>
-                ) : (
-                  ['QB', 'RB', 'WR', 'TE', 'K', 'DEF'].map(pos => {
-                    const count = recentPositions[pos];
-                    if (!count) return null;
-                    return (
-                      <span key={pos} className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${count >= 3 ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-slate-800 text-slate-300'}`}>
-                        {count} {pos}
-                      </span>
-                    )
-                  })
-                )}
-              </div>
-
-              <div className="flex gap-1 overflow-x-auto pb-1">
-                {['ALL', 'QB', 'RB', 'WR', 'TE', 'K', 'DEF'].map((pos) => (
-                  <button key={pos} onClick={() => setSelectedPos(pos)} className={`px-3 py-1 rounded-lg text-xs font-bold ${selectedPos === pos ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400'}`}>{pos}</button>
-                ))}
-              </div>
-            </div>
-            <div className="flex-1 overflow-y-auto divide-y divide-slate-800/50 p-2">
-              {availablePlayers.map((player) => (
-                <div key={player.id} className="flex items-center justify-between p-2.5 hover:bg-slate-800/50 rounded-xl group">
-                  <div className="flex items-center gap-3">
-                    <span className={`px-2 py-1 rounded-md font-bold text-xs ${POSITION_COLORS[player.position]?.badge}`}>{player.position}</span>
-                    <div>
-                      <div className="font-bold text-sm text-white flex items-center gap-1.5">
-                        {player.name}
-                        {player.injury_status && (
-                          <span className={`px-1 py-[1px] rounded-[4px] text-[8px] font-black uppercase leading-none border ${['Out', 'IR', 'PUP', 'Sus', 'Suspended'].includes(player.injury_status) ? 'bg-red-950/80 text-red-500 border-red-500/50' :
-                              player.injury_status === 'Doubtful' ? 'bg-orange-950/80 text-orange-500 border-orange-500/50' :
-                                'bg-amber-950/80 text-amber-500 border-amber-500/50'
-                            }`}>
-                            {player.injury_status === 'Questionable' ? 'Q' : player.injury_status === 'Doubtful' ? 'D' : player.injury_status === 'Suspended' ? 'SUS' : player.injury_status}
-                          </span>
-                        )}
-                      </div>
-                      <div className="text-xs text-slate-400 font-bold uppercase flex items-center gap-1.5 mt-0.5">
-                        {player.team}
-                        {player.bye && <span className="text-[8px] bg-slate-800/80 px-1 py-[1px] rounded">BYE {player.bye}</span>}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {isCommissioner && showCommishTools && (
-                      <button
-                        onClick={() => {
-                          const firstPick = picks.find(p => p.teamId === (teams[0]?.id || 1));
-                          setAssignModal({ isOpen: true, player, teamId: teams[0]?.id || 1, pickNumber: firstPick?.pickNumber || 1, isKeeper: false });
-                        }}
-                        className="px-2 py-1.5 rounded-lg text-[10px] font-bold bg-amber-600/20 text-amber-500 border border-amber-500/30 hover:bg-amber-600 hover:text-white transition uppercase"
-                      >
-                        Assign
-                      </button>
-                    )}
-                    <button
-                      onClick={() => handleSelectPlayer(player)}
-                      disabled={!isDraftActive || (!isCommissioner && !isMyTurnOrSkipped)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold ${!isDraftActive || (!isCommissioner && !isMyTurnOrSkipped) ? 'bg-slate-800 text-slate-600' : 'bg-blue-600 text-white'}`}
-                    >
-                      Draft
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Chat Panel (Bottom Half) */}
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl flex flex-col overflow-hidden flex-1">
-            <div className="p-3 border-b border-slate-800 bg-slate-950 flex justify-between items-center">
-              <h2 className="font-bold text-sm flex items-center gap-2"><MessageSquare className="w-4 h-4 text-blue-400" /> Live Draft Chat</h2>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-3 space-y-3">
-              {messages.length === 0 ? (
-                <div className="flex items-center justify-center h-full text-xs text-slate-500 italic">No messages yet. Start the trash talk!</div>
-              ) : (
-                messages.map(msg => {
-                  const isMe = msg.teamId === userTeamId;
-                  const senderTeamName = teams.find(t => t.id === msg.teamId)?.name || 'Unknown Team';
-                  return (
-                    <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
-                      <span className="text-[9px] text-slate-500 mb-0.5">{senderTeamName}</span>
-                      <div className={`px-3 py-2 text-xs max-w-[85%] ${isMe ? 'bg-blue-600 text-white rounded-2xl rounded-tr-sm' : 'bg-slate-800 text-slate-200 rounded-2xl rounded-tl-sm'}`}>
-                        {msg.text}
-                      </div>
-                    </div>
-                  );
-                })
-              )}
-              <div ref={chatEndRef} />
-            </div>
-
-            <form onSubmit={handleSendMessage} className="p-2 border-t border-slate-800 bg-slate-950 flex gap-2">
-              <input
-                type="text"
-                value={newMessage}
-                onChange={(e) => setNewMessage(e.target.value)}
-                placeholder={userTeamId === null ? "Log in to chat..." : "Message the league..."}
-                disabled={userTeamId === null}
-                className="flex-1 bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-white outline-none focus:border-blue-500 disabled:opacity-50"
-              />
-              <button type="submit" disabled={!newMessage.trim() || userTeamId === null} className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white px-3 py-1.5 rounded-lg transition flex items-center justify-center">
-                <Send className="w-4 h-4" />
-              </button>
-            </form>
-          </div>
-
-        </div>
-
-        {/* Draft Grid - Flex-1 takes remaining monitor space */}
-        <div className="flex-1 min-w-0 bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col h-[780px] lg:h-[calc(100vh-110px)] overflow-hidden">
-          <h2 className="font-bold text-sm flex items-center gap-2 mb-3 pb-2 border-b border-slate-800"><Trophy className="w-4 h-4 text-amber-400" /> Draft Board Grid</h2>
+        <div className="flex-1 min-w-0 bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col h-full overflow-hidden">
           <div className="flex-1 overflow-x-auto overflow-y-auto">
 
-            {/* The ref is attached to this container which expands to hold the entire un-scrolled grid */}
-            <div ref={boardRef} className="inline-block pb-8 w-full bg-slate-900 p-2" style={{ minWidth: `${50 + (teams.length * 90)}px` }}>
+            <div ref={boardRef} className="inline-block pb-8 w-full bg-slate-900 p-2" style={{ minWidth: `${50 + (teams.length * 120)}px` }}>
 
               {/* Header Row */}
               <div
-                className="grid gap-1.5 sticky top-0 bg-slate-900 z-20 pb-2 border-b border-slate-800"
-                style={{ gridTemplateColumns: `48px repeat(${teams.length}, minmax(90px, 1fr))` }}
+                className="grid gap-2 sticky top-0 bg-slate-900 z-20 pb-2 border-b border-slate-800"
+                style={{ gridTemplateColumns: `48px repeat(${teams.length}, minmax(120px, 1fr))` }}
               >
                 <div className="sticky left-0 bg-slate-900 z-30 flex items-center justify-center border-r border-slate-800/50">
                   <span className="text-[10px] font-bold text-slate-500/50">RND</span>
@@ -1596,7 +1627,7 @@ export default function FantasyDraftApp() {
               </div>
 
               {/* Draft Rounds */}
-              <div className="space-y-1.5 mt-2">
+              <div className="space-y-2 mt-2">
                 {Array.from({ length: totalRounds }).map((_, rIdx) => {
                   const rNum = rIdx + 1;
                   const roundPicks = picks.filter((p) => p.round === rNum);
@@ -1604,11 +1635,11 @@ export default function FantasyDraftApp() {
                   return (
                     <div
                       key={rNum}
-                      className="grid gap-1.5 items-stretch relative"
-                      style={{ gridTemplateColumns: `48px repeat(${teams.length}, minmax(90px, 1fr))` }}
+                      className="grid gap-2 items-stretch relative"
+                      style={{ gridTemplateColumns: `48px repeat(${teams.length}, minmax(120px, 1fr))` }}
                     >
                       {/* Sticky Round Number Column */}
-                      <div className="sticky left-0 z-10 bg-slate-900/90 backdrop-blur-md flex items-center justify-center h-full min-h-[84px] border border-slate-800 rounded-lg shadow-[4px_0_15px_-3px_rgba(0,0,0,0.3)]">
+                      <div className="sticky left-0 z-10 bg-slate-900/90 backdrop-blur-md flex items-center justify-center h-full min-h-[90px] border border-slate-800 rounded-lg shadow-[4px_0_15px_-3px_rgba(0,0,0,0.3)]">
                         <span className="text-sm font-black text-slate-400">{rNum}</span>
                       </div>
 
@@ -1618,13 +1649,13 @@ export default function FantasyDraftApp() {
 
                         if (teamPicksThisRound.length === 0) {
                           return (
-                            <div key={`empty-${team.id}-${rNum}`} className="h-full min-h-[84px] bg-slate-900/40 border border-slate-800/30 rounded-lg flex items-center justify-center">
+                            <div key={`empty-${team.id}-${rNum}`} className="h-full min-h-[90px] bg-slate-900/40 border border-slate-800/30 rounded-lg flex items-center justify-center">
                             </div>
                           );
                         }
 
                         return (
-                          <div key={team.id} className="flex flex-col gap-1.5 h-full">
+                          <div key={team.id} className="flex flex-col gap-2 h-full">
                             {teamPicksThisRound.map((pick) => {
                               const pickIndex = picks.findIndex(p => p.pickNumber === pick.pickNumber);
                               const isCurrent = pickIndex === currentPickIndex;
@@ -1635,7 +1666,7 @@ export default function FantasyDraftApp() {
                               const split = enriched ? getSplitName(enriched.name) : null;
 
                               return (
-                                <div key={pick.pickNumber} className={`h-[84px] rounded-lg p-2 flex flex-col justify-between border relative ${isCurrent ? 'border-amber-400 bg-amber-500/10 ring-2 ring-amber-400/30 animate-pulse' : isSkipped ? 'border-red-500/50 bg-red-950/30 ring-1 ring-red-500/50' : enriched ? `${posStyle?.bg} ${posStyle?.border}` : 'bg-slate-950/50 border-slate-800/80'}`}>
+                                <div key={pick.pickNumber} className={`h-[90px] rounded-lg p-2 flex flex-col justify-between border relative ${isCurrent ? 'border-amber-400 bg-amber-500/10 ring-2 ring-amber-400/30 animate-pulse' : isSkipped ? 'border-red-500/50 bg-red-950/30 ring-1 ring-red-500/50' : enriched ? `${posStyle?.bg} ${posStyle?.border}` : 'bg-slate-950/50 border-slate-800/80'}`}>
                                   {pick.isKeeper && (
                                     <div className="absolute -top-2 -right-2 bg-amber-500 text-slate-950 text-[10px] font-black w-5 h-5 flex items-center justify-center rounded-full shadow-lg">K</div>
                                   )}
@@ -1658,14 +1689,14 @@ export default function FantasyDraftApp() {
                                   {/* First Name stacked over BOLD Last Name */}
                                   {enriched && split ? (
                                     <div className="my-auto text-center leading-none">
-                                      <div className="text-[11px] font-semibold text-slate-200 truncate tracking-tight mb-0.5">{split.firstName}</div>
-                                      <div className={`text-xs sm:text-sm font-black tracking-tight truncate uppercase leading-tight ${posStyle?.text}`}>{split.lastName}</div>
+                                      <div className="text-xs font-semibold text-slate-200 truncate tracking-tight mb-0.5">{split.firstName}</div>
+                                      <div className={`text-sm sm:text-base font-black tracking-tight truncate uppercase leading-tight ${posStyle?.text}`}>{split.lastName}</div>
                                     </div>
                                   ) : (
                                     <div className="text-xs text-slate-700 font-semibold text-center my-auto">Empty</div>
                                   )}
 
-                                  {/* Bottom Row - PROMINENT BYE WEEK */}
+                                  {/* Bottom Row - BYE WEEK */}
                                   {enriched && (
                                     <div className="flex justify-between items-center text-[9px] text-white/60 font-medium border-t border-white/10 pt-1">
                                       <span>#{pick.pickNumber}</span>
