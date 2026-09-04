@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Trophy, Clock, Users, Settings, Play, Pause,
-  RotateCcw, Search, Lock, Unlock, ShieldAlert, Loader2, Wifi, Trash2, Save, Download, X, Copy, ArrowRightLeft, Volume2, VolumeX, UserCheck, KeyRound, MessageSquare, Send, ShieldCheck, Edit2, BookOpen, Camera, DollarSign, CheckCircle2, AlertTriangle
+  RotateCcw, Search, Lock, Unlock, ShieldAlert, Loader2, Wifi, Trash2, Save, Download, X, Copy, ArrowRightLeft, Volume2, VolumeX, UserCheck, KeyRound, MessageSquare, Send, ShieldCheck, Edit2, BookOpen, Camera, DollarSign, CheckCircle2, AlertTriangle, FileText, ThumbsUp, ThumbsDown, ListChecks
 } from 'lucide-react';
 import { db } from './firebase';
 import { ref, onValue, set, push } from 'firebase/database';
@@ -52,6 +52,16 @@ interface ChatMessage {
   teamId: number;
   text: string;
   timestamp: number;
+}
+
+// --- NEW PROPOSAL INTERFACE ---
+interface Proposal {
+  id: string;
+  title: string;
+  description: string;
+  submitterTeamId: number;
+  status: 'pending' | 'approved';
+  votes?: Record<number, 'approve' | 'reject'>;
 }
 
 const generateTeams = (count: number): Team[] =>
@@ -134,8 +144,14 @@ export default function FantasyDraftApp() {
   const [isEditingName, setIsEditingName] = useState<boolean>(false);
   const [editNameValue, setEditNameValue] = useState<string>('');
 
-  // --- Bylaws Modal State ---
+  // --- Bylaws & Proposals Modal State ---
   const [showBylawsModal, setShowBylawsModal] = useState<boolean>(false);
+  const [showProposalModal, setShowProposalModal] = useState<boolean>(false);
+  const [proposalForm, setProposalForm] = useState({ title: '', description: '', teamId: 1 });
+
+  // --- Voting Phase State ---
+  const [isVotingPhase, setIsVotingPhase] = useState<boolean>(false);
+  const [proposals, setProposals] = useState<Record<string, Proposal>>({});
 
   // Upgraded Assign Modal State
   const [assignModal, setAssignModal] = useState<{ isOpen: boolean, player: Player | null, teamId: number, pickNumber: number, isKeeper: boolean }>({
@@ -211,7 +227,8 @@ export default function FantasyDraftApp() {
   useEffect(() => {
     async function fetchSleeperPlayers() {
       try {
-        const res = await fetch('/api/players');
+        // The ?t=${Date.now()} acts as a cache-buster, forcing a fresh pull every time
+        const res = await fetch(`/api/players?t=${Date.now()}`);
         const data = await res.json();
         setPlayers(data);
         setIsLoadingAPI(false);
@@ -223,7 +240,7 @@ export default function FantasyDraftApp() {
     fetchSleeperPlayers();
   }, []);
 
-  // Firebase Draft State Sync
+  // Firebase Draft State Sync (Includes new Voting Phase sync)
   useEffect(() => {
     const draftRef = ref(db, 'draftState');
     const unsubscribe = onValue(draftRef, (snapshot) => {
@@ -237,6 +254,10 @@ export default function FantasyDraftApp() {
         if (data.teamPins) setTeamPins(data.teamPins); else setTeamPins({});
         if (data.paidTeams) setPaidTeams(data.paidTeams); else setPaidTeams({});
         if (typeof data.isDraftActive === 'boolean') setIsDraftActive(data.isDraftActive);
+
+        // --- Sync Voting Phase & Proposals ---
+        if (typeof data.isVotingPhase === 'boolean') setIsVotingPhase(data.isVotingPhase); else setIsVotingPhase(false);
+        if (data.proposals) setProposals(data.proposals); else setProposals({});
 
         if (typeof data.currentPickIndex === 'number') {
           if (data.currentPickIndex > prevPickIndexRef.current) {
@@ -271,7 +292,7 @@ export default function FantasyDraftApp() {
     return () => unsubscribe();
   }, []);
 
-  // Auto-scroll chat to bottom (Localized to prevent page jumping)
+  // --- REWIRED Auto-scroll chat to bottom (Localized to prevent page jump) ---
   useEffect(() => {
     if (chatEndRef.current && chatEndRef.current.parentElement) {
       chatEndRef.current.parentElement.scrollTo({
@@ -306,7 +327,9 @@ export default function FantasyDraftApp() {
       totalRounds: rounds,
       customOrder: orderMatrix,
       defaultPickTime: currentDefaultPickTime,
-      paidTeams: {}
+      paidTeams: {},
+      isVotingPhase: false,
+      proposals: {}
     });
   };
 
@@ -438,6 +461,31 @@ export default function FantasyDraftApp() {
       .sort((a, b) => a.adp - b.adp);
   }, [players, picks, selectedPos, searchQuery]);
 
+  // --- Proposal & Voting Handlers ---
+  const handleSubmitProposal = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!proposalForm.title.trim() || !proposalForm.description.trim()) return;
+
+    const newPropRef = push(ref(db, 'draftState/proposals'));
+    set(newPropRef, {
+      id: newPropRef.key,
+      title: proposalForm.title,
+      description: proposalForm.description,
+      submitterTeamId: proposalForm.teamId,
+      status: 'pending',
+      votes: {}
+    });
+
+    setProposalForm({ title: '', description: '', teamId: teams[0]?.id || 1 });
+    setShowProposalModal(false);
+    alert("Proposal submitted! It is now pending Commissioner approval.");
+  };
+
+  const handleVote = (proposalId: string, voteType: 'approve' | 'reject') => {
+    if (userTeamId === null) return;
+    set(ref(db, `draftState/proposals/${proposalId}/votes/${userTeamId}`), voteType);
+  };
+
   const handleSelectPlayer = (player: Player) => {
     let targetIndex = currentPickIndex;
     if (!isCommissioner) {
@@ -537,7 +585,7 @@ export default function FantasyDraftApp() {
       set(ref(db, 'draftState'), {
         picks: newPicks, currentPickIndex: 0, isDraftActive: false,
         teams: tempTeams, totalRounds: tempRounds, customOrder: customOrder,
-        defaultPickTime: defaultPickTime, paidTeams: paidTeams
+        defaultPickTime: defaultPickTime, paidTeams: paidTeams, isVotingPhase: false, proposals: proposals
       });
 
       prevPickIndexRef.current = 0;
@@ -706,7 +754,7 @@ export default function FantasyDraftApp() {
     setCustomOrder(updated);
   };
 
-  // --- BYLAWS MODAL ---
+  // --- MODALS ---
   const renderBylawsModal = () => {
     if (!showBylawsModal) return null;
     return (
@@ -803,7 +851,48 @@ export default function FantasyDraftApp() {
     );
   };
 
-  // --- LOGIN MODAL WITH DUES GATEKEEPER ---
+  const renderProposalModal = () => {
+    if (!showProposalModal) return null;
+    return (
+      <div className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden flex flex-col">
+          <div className="p-4 border-b border-slate-800 bg-slate-950 flex justify-between items-center">
+            <h3 className="font-black text-lg text-white flex items-center gap-2">
+              <FileText className="w-5 h-5 text-blue-400" /> Submit Rule Proposal
+            </h3>
+            <button onClick={() => setShowProposalModal(false)} className="p-1 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white transition">
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+          <form onSubmit={handleSubmitProposal} className="p-5 space-y-4">
+            <p className="text-xs text-slate-400">Propose a change to the league bylaws. The Commissioner will review and format submissions before opening them up to a league-wide vote on draft day.</p>
+
+            <div>
+              <label className="block text-xs uppercase font-bold text-slate-500 mb-1">Submitting Team</label>
+              <select value={proposalForm.teamId} onChange={(e) => setProposalForm({ ...proposalForm, teamId: Number(e.target.value) })} className="w-full bg-slate-950 border border-slate-700 text-white text-sm py-2 px-3 rounded-lg outline-none">
+                {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs uppercase font-bold text-slate-500 mb-1">Proposal Title</label>
+              <input type="text" required placeholder="e.g., Keep 2 Players at Draft Position" value={proposalForm.title} onChange={(e) => setProposalForm({ ...proposalForm, title: e.target.value })} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500" />
+            </div>
+
+            <div>
+              <label className="block text-xs uppercase font-bold text-slate-500 mb-1">Detailed Description & Scenarios</label>
+              <textarea required rows={5} placeholder="Explain the current state, proposed change, and implementation timeline..." value={proposalForm.description} onChange={(e) => setProposalForm({ ...proposalForm, description: e.target.value })} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500 resize-none" />
+            </div>
+
+            <button type="submit" className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition mt-2">
+              Submit to Commissioner
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  };
+
   const renderLoginModal = () => {
     if (!showLoginModal) return null;
     const isTargetPaid = loginTargetTeam ? !!paidTeams[loginTargetTeam.id] : false;
@@ -860,7 +949,6 @@ export default function FantasyDraftApp() {
                 </div>
               </>
             ) : !isTargetPaid && !isCommissioner ? (
-              // --- DUES LOCKOUT SCREEN ---
               <div className="text-center py-6 px-2">
                 <div className="inline-flex p-3 bg-amber-500/10 border border-amber-500/30 rounded-full text-amber-400 mb-3">
                   <DollarSign className="w-8 h-8 animate-bounce" />
@@ -878,7 +966,6 @@ export default function FantasyDraftApp() {
                 </button>
               </div>
             ) : (
-              // --- PIN LOGIN SCREEN ---
               <div className="text-center py-4">
                 <p className="text-sm font-semibold text-white mb-1">
                   {teamPins[loginTargetTeam!.id] ? 'Enter your 4-digit PIN to login' : 'Create a 4-digit PIN to claim this team'}
@@ -959,7 +1046,6 @@ export default function FantasyDraftApp() {
             ))}
           </div>
 
-          {/* PRIZE POT PROGRESS METER */}
           <div className="w-full max-w-sm bg-slate-950 border border-slate-800 rounded-xl p-3.5 mb-6 text-left">
             <div className="flex justify-between items-center mb-1.5">
               <span className="text-xs font-bold text-slate-400 flex items-center gap-1.5 uppercase tracking-wider">
@@ -983,9 +1069,14 @@ export default function FantasyDraftApp() {
             <button onClick={() => setShowLoginModal(true)} className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition shadow-lg shadow-blue-900/20">
               <UserCheck className="w-5 h-5" /> Team Manager Check-In
             </button>
-            <button onClick={() => setShowBylawsModal(true)} className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-xl transition text-xs">
-              <BookOpen className="w-4 h-4" /> View League Bylaws
-            </button>
+            <div className="grid grid-cols-2 gap-3">
+              <button onClick={() => setShowBylawsModal(true)} className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-xl transition text-xs">
+                <BookOpen className="w-4 h-4" /> Bylaws
+              </button>
+              <button onClick={() => setShowProposalModal(true)} className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-xl transition text-xs border border-blue-500/20">
+                <FileText className="w-4 h-4 text-blue-400" /> Propose Rule
+              </button>
+            </div>
             <button onClick={() => setShowCommishPinModal(true)} className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-xl transition text-xs">
               <KeyRound className="w-4 h-4" /> Commissioner Override
             </button>
@@ -995,6 +1086,7 @@ export default function FantasyDraftApp() {
         {renderCommishAuthModal()}
         {renderLoginModal()}
         {renderBylawsModal()}
+        {renderProposalModal()}
       </div>
     );
   }
@@ -1007,13 +1099,12 @@ export default function FantasyDraftApp() {
       <header className="bg-slate-900 border-b border-slate-800 px-2 sm:px-4 py-2 sm:py-3 sticky top-0 z-50">
         <div className="w-full mx-auto flex flex-col lg:flex-row lg:items-center justify-between gap-3 lg:gap-4 relative">
 
-          {/* Top row for mobile: Title & Icons */}
           <div className="flex items-center justify-between w-full lg:w-auto">
             <div className="flex items-center gap-2 sm:gap-3">
               <div className="p-1.5 sm:p-2 bg-blue-600 rounded-lg text-white"><Trophy className="w-5 h-5 sm:w-6 sm:h-6" /></div>
               <div>
                 <div className="flex items-center gap-2">
-                  <h1 className="text-lg sm:text-xl font-black text-white leading-none">JM's FFL</h1>
+                  <h1 className="text-lg sm:text-xl font-black text-white leading-none">JM's FFL - 14th Annual Draft</h1>
                   <span className="hidden sm:flex items-center gap-1 text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full font-bold">
                     <Wifi className="w-3 h-3 animate-pulse" /> Live
                   </span>
@@ -1022,7 +1113,6 @@ export default function FantasyDraftApp() {
               </div>
             </div>
 
-            {/* Quick Actions for Mobile */}
             <div className="flex lg:hidden items-center gap-1">
               <button onClick={() => setShowLoginModal(true)} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-white transition"><UserCheck className="w-4 h-4" /></button>
               <button onClick={() => { setIsPlayersOpen(!isPlayersOpen); setIsChatOpen(false); }} className={`p-2 rounded-lg text-white transition ${isPlayersOpen ? 'bg-blue-600' : 'bg-slate-800 hover:bg-slate-700'}`}><Search className="w-4 h-4" /></button>
@@ -1030,37 +1120,26 @@ export default function FantasyDraftApp() {
             </div>
           </div>
 
-          {/* Horizontally Scrollable Tool Bar on Mobile */}
           <div className="flex items-center gap-2 sm:gap-4 overflow-x-auto lg:overflow-visible pb-1 sm:pb-0 scrollbar-hide w-full lg:w-auto">
 
-            {/* --- DESKTOP PANELS & DROPDOWN ANCHOR --- */}
             <div className="relative flex-shrink-0">
-              {/* Desktop Buttons */}
               <div className="hidden lg:flex items-center gap-2 bg-slate-950 p-1.5 rounded-xl border border-slate-800">
-                <button
-                  onClick={() => { setIsPlayersOpen(!isPlayersOpen); setIsChatOpen(false); }}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition ${isPlayersOpen ? 'bg-blue-600 text-white' : 'bg-slate-800 hover:bg-slate-700 text-white'}`}
-                >
+                <button onClick={() => { setIsPlayersOpen(!isPlayersOpen); setIsChatOpen(false); }} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition ${isPlayersOpen ? 'bg-blue-600 text-white' : 'bg-slate-800 hover:bg-slate-700 text-white'}`}>
                   <Search className="w-4 h-4 text-blue-400" /> Draft Pool
                 </button>
-                <button
-                  onClick={() => { setIsChatOpen(!isChatOpen); setIsPlayersOpen(false); }}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition ${isChatOpen ? 'bg-emerald-600 text-white' : 'bg-slate-800 hover:bg-slate-700 text-white'}`}
-                >
+                <button onClick={() => { setIsChatOpen(!isChatOpen); setIsPlayersOpen(false); }} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition ${isChatOpen ? 'bg-emerald-600 text-white' : 'bg-slate-800 hover:bg-slate-700 text-white'}`}>
                   <MessageSquare className="w-4 h-4 text-emerald-400" /> League Chat
                 </button>
               </div>
 
-              {/* --- PLAYERS DROPDOWN / MOBILE DRAWER --- */}
+              {/* --- PLAYERS DRAWER OVERLAY --- */}
               {isPlayersOpen && (
                 <div className="fixed inset-0 z-50 flex justify-start lg:absolute lg:inset-auto lg:top-full lg:left-0 lg:mt-3 lg:w-[420px] lg:h-[75vh] lg:min-h-[500px] lg:max-h-[850px]">
                   <div className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm lg:hidden" onClick={() => setIsPlayersOpen(false)} />
                   <div className="relative w-full max-w-md lg:w-full lg:max-w-none bg-slate-900 border-r lg:border border-slate-700 lg:rounded-2xl shadow-2xl lg:shadow-[0_20px_60px_rgba(0,0,0,0.8)] overflow-hidden flex flex-col h-full animate-in slide-in-from-left lg:slide-in-from-top-2 lg:fade-in duration-200">
                     <div className="p-4 border-b border-slate-800 bg-slate-950 flex justify-between items-center lg:rounded-t-2xl">
                       <h2 className="font-bold text-base flex items-center gap-2"><Users className="w-5 h-5 text-blue-400" /> Available Players</h2>
-                      <button onClick={() => setIsPlayersOpen(false)} className="p-1.5 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white transition">
-                        <X className="w-5 h-5" />
-                      </button>
+                      <button onClick={() => setIsPlayersOpen(false)} className="p-1.5 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white transition"><X className="w-5 h-5" /></button>
                     </div>
 
                     <div className="p-4 border-b border-slate-800 space-y-3 bg-slate-900">
@@ -1117,7 +1196,7 @@ export default function FantasyDraftApp() {
                             </div>
                           </div>
                           <div className="flex items-center gap-2">
-                            {isCommissioner && showCommishTools && (
+                            {isCommissioner && showCommishTools && !isVotingPhase && (
                               <button
                                 onClick={() => {
                                   const firstPick = picks.find(p => p.teamId === (teams[0]?.id || 1));
@@ -1130,8 +1209,8 @@ export default function FantasyDraftApp() {
                             )}
                             <button
                               onClick={() => handleSelectPlayer(player)}
-                              disabled={!isDraftActive || (!isCommissioner && !isMyTurnOrSkipped)}
-                              className={`px-3 py-1.5 rounded-lg text-xs font-bold ${!isDraftActive || (!isCommissioner && !isMyTurnOrSkipped) ? 'bg-slate-800 text-slate-600' : 'bg-blue-600 text-white'}`}
+                              disabled={!isDraftActive || (!isCommissioner && !isMyTurnOrSkipped) || isVotingPhase}
+                              className={`px-3 py-1.5 rounded-lg text-xs font-bold ${(!isDraftActive || (!isCommissioner && !isMyTurnOrSkipped) || isVotingPhase) ? 'bg-slate-800 text-slate-600' : 'bg-blue-600 text-white'}`}
                             >
                               Draft
                             </button>
@@ -1143,16 +1222,14 @@ export default function FantasyDraftApp() {
                 </div>
               )}
 
-              {/* --- CHAT DROPDOWN / MOBILE DRAWER --- */}
+              {/* --- CHAT DRAWER OVERLAY --- */}
               {isChatOpen && (
                 <div className="fixed inset-0 z-50 flex justify-end lg:absolute lg:inset-auto lg:top-full lg:left-0 lg:mt-3 lg:w-[400px] lg:h-[70vh] lg:min-h-[500px] lg:max-h-[800px]">
                   <div className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm lg:hidden" onClick={() => setIsChatOpen(false)} />
                   <div className="relative w-full max-w-md lg:w-full lg:max-w-none bg-slate-900 border-l lg:border border-slate-700 lg:rounded-2xl shadow-2xl lg:shadow-[0_20px_60px_rgba(0,0,0,0.8)] overflow-hidden flex flex-col h-full animate-in slide-in-from-right lg:slide-in-from-top-2 lg:fade-in duration-200">
                     <div className="p-4 border-b border-slate-800 bg-slate-950 flex justify-between items-center lg:rounded-t-2xl">
                       <h2 className="font-bold text-base flex items-center gap-2"><MessageSquare className="w-5 h-5 text-blue-400" /> Live Draft Chat</h2>
-                      <button onClick={() => setIsChatOpen(false)} className="p-1.5 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white transition">
-                        <X className="w-5 h-5" />
-                      </button>
+                      <button onClick={() => setIsChatOpen(false)} className="p-1.5 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white transition"><X className="w-5 h-5" /></button>
                     </div>
 
                     <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-900">
@@ -1193,34 +1270,44 @@ export default function FantasyDraftApp() {
               )}
             </div>
 
-            {/* PANIC CLOCK UI */}
-            <div className={`flex items-center gap-3 sm:gap-6 rounded-xl px-3 py-1.5 sm:px-4 sm:py-2 border transition-all flex-shrink-0 ${clockTime <= 10 && isDraftActive ? 'bg-red-950 border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.4)]' : 'bg-slate-950 border-slate-800'}`}>
-              <div className="flex items-center gap-1.5 sm:gap-2">
-                <Clock className={`w-4 h-4 sm:w-5 sm:h-5 ${clockTime <= 10 && isDraftActive ? 'text-red-500 animate-pulse' : 'text-blue-400'}`} />
-                <span className={`text-xl sm:text-2xl font-mono font-bold ${clockTime <= 10 && isDraftActive ? 'text-red-500' : 'text-white'}`}>
-                  {Math.floor(clockTime / 60)}:{(clockTime % 60).toString().padStart(2, '0')}
-                </span>
-              </div>
-              <div className={`h-6 sm:h-8 w-[1px] ${clockTime <= 10 && isDraftActive ? 'bg-red-500/30' : 'bg-slate-800'}`} />
-              <div className="text-left">
-                <div className="text-[8px] sm:text-[10px] text-slate-400 uppercase font-bold leading-none mb-0.5">On The Clock</div>
-                <div className={`text-[10px] sm:text-sm font-bold truncate max-w-[120px] sm:max-w-[200px] leading-tight ${clockTime <= 10 && isDraftActive ? 'text-red-400' : 'text-blue-400'}`}>
-                  {currentPick ? `${currentPick.pickNumber} (${currentPickingTeam?.name})` : 'Draft Complete!'}
+            {/* PANIC CLOCK UI (Hidden during Voting Phase) */}
+            {!isVotingPhase ? (
+              <div className={`flex items-center gap-3 sm:gap-6 rounded-xl px-3 py-1.5 sm:px-4 sm:py-2 border transition-all flex-shrink-0 ${clockTime <= 10 && isDraftActive ? 'bg-red-950 border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.4)]' : 'bg-slate-950 border-slate-800'}`}>
+                <div className="flex items-center gap-1.5 sm:gap-2">
+                  <Clock className={`w-4 h-4 sm:w-5 sm:h-5 ${clockTime <= 10 && isDraftActive ? 'text-red-500 animate-pulse' : 'text-blue-400'}`} />
+                  <span className={`text-xl sm:text-2xl font-mono font-bold ${clockTime <= 10 && isDraftActive ? 'text-red-500' : 'text-white'}`}>
+                    {Math.floor(clockTime / 60)}:{(clockTime % 60).toString().padStart(2, '0')}
+                  </span>
+                </div>
+                <div className={`h-6 sm:h-8 w-[1px] ${clockTime <= 10 && isDraftActive ? 'bg-red-500/30' : 'bg-slate-800'}`} />
+                <div className="text-left">
+                  <div className="text-[8px] sm:text-[10px] text-slate-400 uppercase font-bold leading-none mb-0.5">On The Clock</div>
+                  <div className={`text-[10px] sm:text-sm font-bold truncate max-w-[120px] sm:max-w-[200px] leading-tight ${clockTime <= 10 && isDraftActive ? 'text-red-400' : 'text-blue-400'}`}>
+                    {currentPick ? `${currentPick.pickNumber} (${currentPickingTeam?.name})` : 'Draft Complete!'}
+                  </div>
                 </div>
               </div>
-            </div>
+            ) : (
+              <div className="flex items-center gap-3 sm:gap-6 rounded-xl px-4 py-2 border bg-blue-900/20 border-blue-500/30 flex-shrink-0">
+                <div className="text-blue-400 font-black tracking-widest uppercase flex items-center gap-2">
+                  <ShieldAlert className="w-5 h-5 animate-pulse" /> Live Voting Phase
+                </div>
+              </div>
+            )}
 
             {/* Admin/Commish controls */}
             <div className="flex items-center gap-1.5 sm:gap-3 flex-shrink-0">
-              {isCommissioner && (
+              {isCommissioner && !isVotingPhase && (
                 <button onClick={toggleDraftStatus} className={`flex items-center gap-1.5 px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg font-semibold text-xs sm:text-sm transition ${isDraftActive ? 'bg-amber-600/20 text-amber-300 border border-amber-500' : 'bg-emerald-600 text-white'}`}>
                   {isDraftActive ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />} {isDraftActive ? 'Pause' : 'Start'}
                 </button>
               )}
-              <button onClick={handleDownloadBoard} className="p-1.5 sm:p-2 rounded-lg bg-slate-800 text-slate-300 hover:text-white transition"><Camera className="w-4 h-4 sm:w-5 sm:h-5" /></button>
+              {!isVotingPhase && <button onClick={handleDownloadBoard} className="p-1.5 sm:p-2 rounded-lg bg-slate-800 text-slate-300 hover:text-white transition"><Camera className="w-4 h-4 sm:w-5 sm:h-5" /></button>}
               <button onClick={toggleMute} className="p-1.5 sm:p-2 rounded-lg bg-slate-800 text-slate-300 hover:text-white transition">{isMuted ? <VolumeX className="w-4 h-4 sm:w-5 sm:h-5" /> : <Volume2 className="w-4 h-4 sm:w-5 sm:h-5" />}</button>
               <button onClick={toggleCommishPanel} className="p-1.5 sm:p-2 rounded-lg bg-slate-800 text-slate-300 hover:text-white transition"><Settings className="w-4 h-4 sm:w-5 sm:h-5" /></button>
-              <button onClick={() => setShowLoginModal(true)} className="hidden lg:block p-1.5 sm:p-2 rounded-lg bg-slate-800 text-slate-300 hover:text-white transition"><UserCheck className="w-4 h-4 sm:w-5 sm:h-5" /></button>
+              <button onClick={() => setShowLoginModal(true)} className="hidden lg:block p-1.5 sm:p-2 rounded-lg bg-slate-800 text-slate-300 hover:text-white transition">
+                <UserCheck className={`w-4 h-4 sm:w-5 sm:h-5 ${activeUserTeam ? 'text-emerald-400' : ''}`} />
+              </button>
             </div>
           </div>
         </div>
@@ -1231,7 +1318,7 @@ export default function FantasyDraftApp() {
       {renderBylawsModal()}
 
       {/* Manual Assignment Modal */}
-      {assignModal.isOpen && assignModal.player && (
+      {assignModal.isOpen && assignModal.player && !isVotingPhase && (
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-amber-500/30 rounded-xl w-full max-w-sm shadow-2xl overflow-hidden">
             <div className="bg-amber-600/20 p-4 border-b border-amber-500/30">
@@ -1343,260 +1430,415 @@ export default function FantasyDraftApp() {
             </div>
 
             {/* League Settings & Custom Round Editor */}
-            <div className="flex flex-col bg-slate-950 p-4 rounded-xl border border-slate-800">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-sm font-bold text-blue-400 uppercase flex items-center gap-2"><Settings className="w-4 h-4" /> Board & Order Settings</h3>
-                <button onClick={handleApplySettings} className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition">
-                  <Save className="w-3.5 h-3.5" /> Apply & Reset Board
+            <div className="flex flex-col gap-6">
+
+              <div className="flex flex-col bg-slate-950 p-4 rounded-xl border border-slate-800">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-sm font-bold text-blue-400 uppercase flex items-center gap-2"><Settings className="w-4 h-4" /> Board Settings</h3>
+                  <button onClick={handleApplySettings} className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition">
+                    <Save className="w-3.5 h-3.5" /> Apply & Reset Board
+                  </button>
+                </div>
+
+                <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 mb-6">
+                  <div className="flex-1">
+                    <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Number of Teams</label>
+                    <input type="number" value={tempTeams.length} onChange={(e) => updateTempTeamCount(Number(e.target.value))} min={2} max={32} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500" />
+                  </div>
+                  <div className="flex-1">
+                    <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Total Rounds</label>
+                    <input type="number" value={tempRounds} onChange={(e) => handleRoundsChange(Number(e.target.value))} min={1} max={30} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500" />
+                  </div>
+                </div>
+
+                <div className="flex-1 border-t border-slate-800 pt-4 flex flex-col">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
+                    <label className="block text-[10px] uppercase font-bold text-slate-500">Round-by-Round Editor</label>
+                    <select value={editingRound} onChange={(e) => setEditingRound(Number(e.target.value))} className="bg-slate-900 border border-slate-700 text-white text-xs py-1.5 sm:py-1 px-2 rounded outline-none w-full sm:w-auto">
+                      {Array.from({ length: tempRounds }).map((_, i) => (
+                        <option key={i} value={i + 1}>Edit Round {i + 1}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex items-center gap-2 mb-3">
+                    <button onClick={handleCopyPrevRound} disabled={editingRound === 1} className="flex-1 flex justify-center items-center gap-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-md py-1.5 text-xs text-slate-300 disabled:opacity-50 disabled:cursor-not-allowed transition">
+                      <Copy className="w-3.5 h-3.5" /> Copy Prev
+                    </button>
+                    <button onClick={handleReverseCurrentRound} className="flex-1 flex justify-center items-center gap-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-md py-1.5 text-xs text-slate-300 transition">
+                      <ArrowRightLeft className="w-3.5 h-3.5" /> Reverse Order
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-2 overflow-y-auto pr-1 max-h-48">
+                    {customOrder[editingRound - 1]?.map((teamId, slotIdx) => (
+                      <div key={slotIdx} className="flex flex-col gap-1 bg-slate-900 p-2 rounded-lg border border-slate-800">
+                        <span className="text-[9px] font-bold text-slate-500 uppercase">Pick {slotIdx + 1}</span>
+                        <select value={teamId} onChange={(e) => updateCustomOrderSlot(editingRound - 1, slotIdx, Number(e.target.value))} className="bg-slate-950 border border-slate-800 text-white text-xs py-1 px-1.5 rounded outline-none w-full">
+                          {tempTeams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                        </select>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* --- PROPOSAL MANAGEMENT PANEL --- */}
+              <div className="flex flex-col bg-slate-950 p-4 rounded-xl border border-slate-800">
+                <div className="flex items-center justify-between mb-4 pb-4 border-b border-slate-800">
+                  <h3 className="text-sm font-bold text-blue-400 uppercase flex items-center gap-2"><ListChecks className="w-4 h-4" /> Manage Proposals</h3>
+                  <button
+                    onClick={() => {
+                      if (!isVotingPhase) {
+                        setIsDraftActive(false); // Pause draft if starting vote
+                      }
+                      set(ref(db, 'draftState/isVotingPhase'), !isVotingPhase);
+                      setShowCommishTools(false);
+                    }}
+                    className={`px-4 py-2 rounded-lg text-xs font-bold transition shadow-lg ${isVotingPhase ? 'bg-red-600 hover:bg-red-500 text-white shadow-red-900/20' : 'bg-blue-600 hover:bg-blue-500 text-white shadow-blue-900/20'}`}
+                  >
+                    {isVotingPhase ? 'End Voting Phase & Unlock Draft' : 'Initiate Voting Phase'}
+                  </button>
+                </div>
+
+                <div className="space-y-3 max-h-64 overflow-y-auto pr-1">
+                  {Object.values(proposals).length === 0 ? (
+                    <p className="text-xs text-slate-500 italic text-center py-4">No proposals submitted yet.</p>
+                  ) : (
+                    Object.values(proposals).map(prop => (
+                      <div key={prop.id} className="bg-slate-900 border border-slate-700 p-3 rounded-lg flex flex-col gap-2">
+                        <div className="flex justify-between items-start">
+                          <h4 className="text-sm font-bold text-white">{prop.title}</h4>
+                          <span className={`text-[9px] uppercase font-black px-2 py-0.5 rounded ${prop.status === 'approved' ? 'bg-emerald-950/80 text-emerald-400 border border-emerald-500/30' : 'bg-amber-950/80 text-amber-400 border border-amber-500/30'}`}>
+                            {prop.status}
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-400 whitespace-pre-wrap">{prop.description}</p>
+
+                        <div className="flex justify-end gap-2 mt-2 pt-2 border-t border-slate-800">
+                          <button onClick={() => set(ref(db, `draftState/proposals/${prop.id}`), null)} className="px-3 py-1.5 bg-red-950/50 hover:bg-red-900/50 text-red-400 text-[10px] font-bold rounded transition">Delete</button>
+                          {prop.status === 'pending' && (
+                            <button onClick={() => set(ref(db, `draftState/proposals/${prop.id}/status`), 'approved')} className="px-3 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/40 border border-emerald-500/30 text-emerald-400 text-[10px] font-bold rounded transition">Approve for Ballot</button>
+                          )}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- VOTING PHASE SCREEN (OVERRIDES DRAFT BOARD) --- */}
+      {isVotingPhase ? (
+        <div className="flex-1 w-full px-4 pb-8 pt-4 flex flex-col items-center justify-start relative h-[calc(100vh-110px)] overflow-y-auto">
+          <div className="w-full max-w-4xl bg-slate-900 border border-blue-500/30 rounded-2xl p-6 md:p-10 shadow-2xl relative">
+
+            <div className="text-center mb-8">
+              <div className="inline-flex p-4 bg-blue-600/10 border border-blue-500/30 rounded-full text-blue-400 mb-4">
+                <ListChecks className="w-10 h-10" />
+              </div>
+              <h2 className="text-3xl font-black text-white uppercase tracking-tight">League Ballot</h2>
+              <p className="text-sm text-slate-400 mt-2">The Commissioner has paused the draft for an official league vote. Review the proposals below.</p>
+
+              {!userTeamId && (
+                <div className="mt-6 p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl inline-block text-left">
+                  <div className="flex items-center gap-3">
+                    <AlertTriangle className="w-6 h-6 text-amber-500" />
+                    <div>
+                      <h4 className="text-sm font-bold text-amber-400">Authentication Required</h4>
+                      <p className="text-xs text-amber-200/60 mt-0.5">You must check in as a Team Manager to cast your vote.</p>
+                    </div>
+                    <button onClick={() => setShowLoginModal(true)} className="ml-4 px-4 py-2 bg-amber-500 hover:bg-amber-400 text-amber-950 font-bold text-xs rounded-lg transition">Check In</button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-6">
+              {Object.values(proposals).filter(p => p.status === 'approved').length === 0 ? (
+                <div className="text-center p-8 bg-slate-950 border border-slate-800 rounded-xl text-slate-500 italic">No approved proposals on the ballot.</div>
+              ) : (
+                Object.values(proposals).filter(p => p.status === 'approved').map((prop, idx) => {
+                  const submitterName = teams.find(t => t.id === prop.submitterTeamId)?.name || 'League Member';
+                  const votes = prop.votes || {};
+                  const approveCount = Object.values(votes).filter(v => v === 'approve').length;
+                  const rejectCount = Object.values(votes).filter(v => v === 'reject').length;
+                  const totalVotes = approveCount + rejectCount;
+                  const myVote = userTeamId ? votes[userTeamId] : null;
+
+                  return (
+                    <div key={prop.id} className="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden shadow-lg">
+                      <div className="p-5 md:p-6 border-b border-slate-800">
+                        <div className="flex items-start justify-between gap-4 mb-3">
+                          <h3 className="text-lg md:text-xl font-black text-white leading-tight">Proposal {idx + 1}: {prop.title}</h3>
+                          <span className="text-[10px] font-bold text-slate-500 bg-slate-900 px-2 py-1 rounded whitespace-nowrap">By {submitterName}</span>
+                        </div>
+                        <div className="text-sm text-slate-300 leading-relaxed whitespace-pre-wrap bg-slate-900/50 p-4 rounded-lg border border-slate-800/50">{prop.description}</div>
+                      </div>
+
+                      <div className="p-5 md:p-6 bg-slate-900/30 flex flex-col md:flex-row items-center justify-between gap-6">
+
+                        {/* Vote Controls */}
+                        <div className="flex-1 w-full">
+                          {userTeamId ? (
+                            <div className="flex items-center gap-3">
+                              <button
+                                onClick={() => handleVote(prop.id, 'approve')}
+                                className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-sm transition border ${myVote === 'approve' ? 'bg-emerald-600 text-white border-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.3)]' : 'bg-slate-900 text-slate-400 border-slate-700 hover:bg-slate-800 hover:text-white'}`}
+                              >
+                                <ThumbsUp className="w-5 h-5" /> Approve
+                              </button>
+                              <button
+                                onClick={() => handleVote(prop.id, 'reject')}
+                                className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-sm transition border ${myVote === 'reject' ? 'bg-red-600 text-white border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.3)]' : 'bg-slate-900 text-slate-400 border-slate-700 hover:bg-slate-800 hover:text-white'}`}
+                              >
+                                <ThumbsDown className="w-5 h-5" /> Reject
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="w-full py-3 bg-slate-900 border border-slate-800 rounded-xl text-center text-sm font-bold text-slate-500">
+                              Waiting for authentication...
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Live Results Bar */}
+                        <div className="flex-1 w-full flex flex-col justify-center">
+                          <div className="flex justify-between text-xs font-bold mb-2">
+                            <span className="text-emerald-400">{approveCount} Approved</span>
+                            <span className="text-slate-500">{totalVotes} / {teams.length} Voted</span>
+                            <span className="text-red-400">{rejectCount} Rejected</span>
+                          </div>
+                          <div className="w-full h-3 bg-slate-800 rounded-full overflow-hidden flex">
+                            <div className="bg-emerald-500 h-full transition-all duration-500" style={{ width: `${totalVotes === 0 ? 0 : (approveCount / teams.length) * 100}%` }} />
+                            <div className="bg-red-500 h-full transition-all duration-500 ml-auto" style={{ width: `${totalVotes === 0 ? 0 : (rejectCount / teams.length) * 100}%` }} />
+                          </div>
+                        </div>
+
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {isCommissioner && (
+              <div className="mt-10 pt-6 border-t border-slate-800 flex justify-center">
+                <button
+                  onClick={() => set(ref(db, 'draftState/isVotingPhase'), false)}
+                  className="px-8 py-4 bg-blue-600 hover:bg-blue-500 text-white font-black text-sm rounded-xl transition shadow-lg shadow-blue-900/20"
+                >
+                  Conclude Voting & Unlock Draft Room
                 </button>
               </div>
+            )}
+          </div>
+        </div>
+      ) : (
+        /* --- Main Board - SWIPEABLE ON MOBILE, EDGE TO EDGE ON TV --- */
+        <div className="flex-1 w-full px-1 sm:px-4 pb-4 pt-1 sm:pt-2 flex flex-col relative h-[calc(100vh-140px)] sm:h-[calc(100vh-110px)] overflow-hidden">
 
-              <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 mb-6">
-                <div className="flex-1">
-                  <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Number of Teams</label>
-                  <input type="number" value={tempTeams.length} onChange={(e) => updateTempTeamCount(Number(e.target.value))} min={2} max={32} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500" />
+          {/* Roster Modal Overlay */}
+          {viewingTeam && (
+            <div className="absolute inset-0 z-40 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 rounded-2xl">
+              <div className="bg-slate-900 border border-slate-700 rounded-xl w-full max-w-md shadow-2xl flex flex-col max-h-[90%]">
+                <div className="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-950 rounded-t-xl">
+                  {isEditingName ? (
+                    <div className="flex items-center gap-2 flex-1 mr-4">
+                      <Users className="w-5 h-5 text-blue-400" />
+                      <input type="text" value={editNameValue} onChange={(e) => setEditNameValue(e.target.value)} className="bg-slate-900 border border-slate-700 text-white px-2 py-1 rounded text-sm font-bold outline-none flex-1 focus:border-blue-500" autoFocus onKeyDown={(e) => e.key === 'Enter' && handleSaveTeamName()} />
+                      <button onClick={handleSaveTeamName} className="bg-emerald-600 hover:bg-emerald-500 text-white px-2 py-1 rounded text-xs font-bold transition">Save</button>
+                      <button onClick={() => setIsEditingName(false)} className="bg-slate-800 hover:bg-slate-700 text-white px-2 py-1 rounded text-xs font-bold transition">Cancel</button>
+                    </div>
+                  ) : (
+                    <h3 className="font-black text-lg text-white flex items-center gap-2">
+                      <Users className="w-5 h-5 text-blue-400" /> {viewingTeam.name} Roster
+                      {(isCommissioner || userTeamId === viewingTeam.id) && (
+                        <button onClick={() => setIsEditingName(true)} className="p-1 hover:bg-slate-800 text-slate-500 hover:text-blue-400 rounded transition ml-1" title="Edit Team Name">
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </h3>
+                  )}
+                  {!isEditingName && (
+                    <button onClick={() => setViewingTeam(null)} className="p-1 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white transition">
+                      <X className="w-5 h-5" />
+                    </button>
+                  )}
                 </div>
-                <div className="flex-1">
-                  <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Total Rounds</label>
-                  <input type="number" value={tempRounds} onChange={(e) => handleRoundsChange(Number(e.target.value))} min={1} max={30} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500" />
+                <div className="p-3 overflow-y-auto flex-1 space-y-1.5">
+                  {picks.filter(p => p.teamId === viewingTeam.id).map(pick => {
+                    const enriched = getEnrichedPlayer(pick.player);
+                    return (
+                      <div key={pick.pickNumber} className="flex items-center justify-between p-3 rounded-lg bg-slate-950/50 border border-slate-800/80">
+                        <div className="text-xs text-slate-500 font-bold w-10">R{pick.round}</div>
+                        {enriched ? (
+                          <div className="flex-1 flex justify-between items-center ml-2">
+                            <span className="font-bold text-sm text-white flex items-center gap-1.5">
+                              {enriched.name}
+                              {enriched.injury_status && (
+                                <span className={`px-1 py-[1px] rounded-[4px] text-[8px] font-black uppercase leading-none border ${['Out', 'IR', 'PUP', 'Sus', 'Suspended'].includes(enriched.injury_status) ? 'bg-red-950/80 text-red-500 border-red-500/50' :
+                                  enriched.injury_status === 'Doubtful' ? 'bg-orange-950/80 text-orange-500 border-orange-500/50' :
+                                    'bg-amber-950/80 text-amber-500 border-amber-500/50'
+                                  }`}>
+                                  {enriched.injury_status === 'Questionable' ? 'Q' : enriched.injury_status === 'Doubtful' ? 'D' : enriched.injury_status === 'Suspended' ? 'SUS' : enriched.injury_status}
+                                </span>
+                              )}
+                              {pick.isKeeper && <span className="text-[10px] bg-amber-500/20 text-amber-500 px-1 py-0.5 rounded border border-amber-500/30">KEEPER</span>}
+                            </span>
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs text-slate-400 font-bold uppercase flex items-center gap-1">
+                                {enriched.team}
+                                {enriched.bye && <span className="text-[8px] bg-slate-800/80 px-1 py-[1px] rounded">BYE {enriched.bye}</span>}
+                              </span>
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${POSITION_COLORS[enriched.position]?.badge}`}>{enriched.position}</span>
+                              {isCommissioner && showCommishTools && (
+                                <button onClick={() => handleManualRemovePlayer(picks.findIndex(p => p.pickNumber === pick.pickNumber))} className="p-1.5 hover:bg-red-500/20 text-red-500 rounded-md transition ml-1">
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex-1 ml-2 text-sm text-slate-600 font-semibold italic">Empty</div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
+            </div>
+          )}
 
-              {/* Round-by-Round Customizer */}
-              <div className="flex-1 border-t border-slate-800 pt-4 flex flex-col">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
-                  <label className="block text-[10px] uppercase font-bold text-slate-500">Round-by-Round Editor</label>
-                  <select value={editingRound} onChange={(e) => setEditingRound(Number(e.target.value))} className="bg-slate-900 border border-slate-700 text-white text-xs py-1.5 sm:py-1 px-2 rounded outline-none w-full sm:w-auto">
-                    {Array.from({ length: tempRounds }).map((_, i) => (
-                      <option key={i} value={i + 1}>Edit Round {i + 1}</option>
-                    ))}
-                  </select>
-                </div>
+          <div className="flex-1 min-w-0 bg-slate-900 border border-slate-800 rounded-xl sm:rounded-2xl p-2 sm:p-4 flex flex-col h-full overflow-hidden shadow-2xl">
 
-                <div className="flex items-center gap-2 mb-3">
-                  <button onClick={handleCopyPrevRound} disabled={editingRound === 1} className="flex-1 flex justify-center items-center gap-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-md py-1.5 text-xs text-slate-300 disabled:opacity-50 disabled:cursor-not-allowed transition">
-                    <Copy className="w-3.5 h-3.5" /> Copy Prev
-                  </button>
-                  <button onClick={handleReverseCurrentRound} className="flex-1 flex justify-center items-center gap-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-md py-1.5 text-xs text-slate-300 transition">
-                    <ArrowRightLeft className="w-3.5 h-3.5" /> Reverse Order
-                  </button>
-                </div>
+            {/* HORIZONTAL SCROLL ENABLED HERE */}
+            <div className="flex-1 overflow-x-auto overflow-y-auto">
 
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-2 overflow-y-auto pr-1">
-                  {customOrder[editingRound - 1]?.map((teamId, slotIdx) => (
-                    <div key={slotIdx} className="flex flex-col gap-1 bg-slate-900 p-2 rounded-lg border border-slate-800">
-                      <span className="text-[9px] font-bold text-slate-500 uppercase">Pick {slotIdx + 1}</span>
-                      <select value={teamId} onChange={(e) => updateCustomOrderSlot(editingRound - 1, slotIdx, Number(e.target.value))} className="bg-slate-950 border border-slate-800 text-white text-xs py-1 px-1.5 rounded outline-none w-full">
-                        {tempTeams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                      </select>
-                    </div>
+              {/* THE SQUISH FIX: min-w-full with inline-block enables scroll on mobile but stretches cleanly to edges on TV */}
+              <div ref={boardRef} className="inline-block pb-8 min-w-full bg-slate-900 p-1 sm:p-2" style={{ minWidth: `${48 + (teams.length * 110)}px` }}>
+
+                {/* Header Row */}
+                <div
+                  className="grid gap-1.5 sm:gap-2 sticky top-0 bg-slate-900 z-20 pb-2 border-b border-slate-800"
+                  style={{ gridTemplateColumns: `48px repeat(${teams.length}, 1fr)` }}
+                >
+                  <div className="sticky left-0 bg-slate-900 z-30 flex items-center justify-center border-r border-slate-800/50">
+                    <span className="text-[10px] font-bold text-slate-500/50">RND</span>
+                  </div>
+
+                  {teams.map((team) => (
+                    <button
+                      key={team.id}
+                      onClick={() => setViewingTeam(team)}
+                      className="bg-slate-950 border border-slate-800 hover:border-blue-500 hover:bg-slate-800 transition rounded-lg p-2 text-center cursor-pointer group min-h-[44px] flex items-center justify-center shadow-sm"
+                    >
+                      <div className="text-[10px] sm:text-xs font-black text-white group-hover:text-blue-400 leading-tight uppercase line-clamp-2">{team.name}</div>
+                    </button>
                   ))}
+                </div>
+
+                {/* Draft Rounds */}
+                <div className="space-y-1.5 sm:space-y-2 mt-2">
+                  {Array.from({ length: totalRounds }).map((_, rIdx) => {
+                    const rNum = rIdx + 1;
+                    const roundPicks = picks.filter((p) => p.round === rNum);
+
+                    return (
+                      <div
+                        key={rNum}
+                        className="grid gap-1.5 sm:gap-2 items-stretch relative"
+                        style={{ gridTemplateColumns: `48px repeat(${teams.length}, 1fr)` }}
+                      >
+                        {/* Sticky Round Number Column */}
+                        <div className="sticky left-0 z-10 bg-slate-900/90 backdrop-blur-md flex items-center justify-center h-full min-h-[80px] sm:min-h-[90px] border border-slate-800 rounded-lg shadow-[4px_0_15px_-3px_rgba(0,0,0,0.3)]">
+                          <span className="text-sm font-black text-slate-400">{rNum}</span>
+                        </div>
+
+                        {/* Team Pick Blocks */}
+                        {teams.map((team) => {
+                          const teamPicksThisRound = roundPicks.filter((p) => p.teamId === team.id);
+
+                          if (teamPicksThisRound.length === 0) {
+                            return (
+                              <div key={`empty-${team.id}-${rNum}`} className="h-full min-h-[80px] sm:min-h-[90px] bg-slate-900/40 border border-slate-800/30 rounded-lg flex items-center justify-center">
+                              </div>
+                            );
+                          }
+
+                          return (
+                            <div key={team.id} className="flex flex-col gap-1.5 sm:gap-2 h-full">
+                              {teamPicksThisRound.map((pick) => {
+                                const pickIndex = picks.findIndex(p => p.pickNumber === pick.pickNumber);
+                                const isCurrent = pickIndex === currentPickIndex;
+                                const isSkipped = !pick.player && pickIndex < currentPickIndex;
+
+                                const enriched = getEnrichedPlayer(pick.player);
+                                const posStyle = enriched ? POSITION_COLORS[enriched.position] : null;
+                                const split = enriched ? getSplitName(enriched.name) : null;
+
+                                return (
+                                  <div key={pick.pickNumber} className={`h-[80px] sm:h-[90px] rounded-lg p-1.5 sm:p-2 flex flex-col justify-between border relative shadow-sm ${isCurrent ? 'border-amber-400 bg-amber-500/10 ring-2 ring-amber-400/30 animate-pulse' : isSkipped ? 'border-red-500/50 bg-red-950/30 ring-1 ring-red-500/50' : enriched ? `${posStyle?.bg} ${posStyle?.border}` : 'bg-slate-950/50 border-slate-800/80'}`}>
+                                    {pick.isKeeper && (
+                                      <div className="absolute -top-2 -right-2 bg-amber-500 text-slate-950 text-[9px] sm:text-[10px] font-black w-4 h-4 sm:w-5 sm:h-5 flex items-center justify-center rounded-full shadow-lg">K</div>
+                                    )}
+
+                                    {/* Top Bar: Position & NFL Team / Pick # */}
+                                    <div className="flex justify-between items-center text-[9px] sm:text-[10px]">
+                                      {enriched ? (
+                                        <span className={`px-1 sm:px-1.5 py-0.5 rounded font-bold text-[8px] sm:text-[9px] ${posStyle?.badge}`}>{enriched.position}</span>
+                                      ) : (
+                                        <span className="text-slate-500 font-medium">#{pick.pickNumber}</span>
+                                      )}
+
+                                      {enriched && (
+                                        <span className="text-white/70 font-bold text-[9px] sm:text-[10px] uppercase">
+                                          {enriched.team}
+                                        </span>
+                                      )}
+                                    </div>
+
+                                    {/* First Name stacked over BOLD Last Name */}
+                                    {enriched && split ? (
+                                      <div className="my-auto text-center leading-none px-0.5">
+                                        <div className="text-[9px] sm:text-xs font-semibold text-slate-200 truncate tracking-tight mb-0.5">{split.firstName}</div>
+                                        <div className={`text-[11px] sm:text-sm font-black tracking-tight truncate uppercase leading-tight ${posStyle?.text}`}>{split.lastName}</div>
+                                      </div>
+                                    ) : (
+                                      <div className="text-[10px] sm:text-xs text-slate-700 font-semibold text-center my-auto">Empty</div>
+                                    )}
+
+                                    {/* Bottom Row - BYE WEEK */}
+                                    {enriched && (
+                                      <div className="flex justify-between items-center text-[8px] sm:text-[9px] text-white/60 font-medium border-t border-white/10 pt-1 mt-1">
+                                        <span>#{pick.pickNumber}</span>
+                                        {enriched.bye && (
+                                          <span className="text-white font-black bg-black/40 border border-white/10 px-1.5 py-[1px] rounded text-[7px] sm:text-[8px] leading-none">
+                                            BYE {enriched.bye}
+                                          </span>
+                                        )}
+                                        <span>R{pick.round}</span>
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             </div>
           </div>
         </div>
       )}
-
-      {/* Main Board - SWIPEABLE ON MOBILE, EDGE TO EDGE ON TV */}
-      <div className="flex-1 w-full px-1 sm:px-4 pb-4 pt-1 sm:pt-2 flex flex-col relative h-[calc(100vh-140px)] sm:h-[calc(100vh-110px)] overflow-hidden">
-
-        {/* Roster Modal Overlay */}
-        {viewingTeam && (
-          <div className="absolute inset-0 z-40 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 rounded-2xl">
-            <div className="bg-slate-900 border border-slate-700 rounded-xl w-full max-w-md shadow-2xl flex flex-col max-h-[90%]">
-              <div className="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-950 rounded-t-xl">
-                {isEditingName ? (
-                  <div className="flex items-center gap-2 flex-1 mr-4">
-                    <Users className="w-5 h-5 text-blue-400" />
-                    <input type="text" value={editNameValue} onChange={(e) => setEditNameValue(e.target.value)} className="bg-slate-900 border border-slate-700 text-white px-2 py-1 rounded text-sm font-bold outline-none flex-1 focus:border-blue-500" autoFocus onKeyDown={(e) => e.key === 'Enter' && handleSaveTeamName()} />
-                    <button onClick={handleSaveTeamName} className="bg-emerald-600 hover:bg-emerald-500 text-white px-2 py-1 rounded text-xs font-bold transition">Save</button>
-                    <button onClick={() => setIsEditingName(false)} className="bg-slate-800 hover:bg-slate-700 text-white px-2 py-1 rounded text-xs font-bold transition">Cancel</button>
-                  </div>
-                ) : (
-                  <h3 className="font-black text-lg text-white flex items-center gap-2">
-                    <Users className="w-5 h-5 text-blue-400" /> {viewingTeam.name} Roster
-                    {(isCommissioner || userTeamId === viewingTeam.id) && (
-                      <button onClick={() => setIsEditingName(true)} className="p-1 hover:bg-slate-800 text-slate-500 hover:text-blue-400 rounded transition ml-1" title="Edit Team Name">
-                        <Edit2 className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-                  </h3>
-                )}
-                {!isEditingName && (
-                  <button onClick={() => setViewingTeam(null)} className="p-1 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white transition">
-                    <X className="w-5 h-5" />
-                  </button>
-                )}
-              </div>
-              <div className="p-3 overflow-y-auto flex-1 space-y-1.5">
-                {picks.filter(p => p.teamId === viewingTeam.id).map(pick => {
-                  const enriched = getEnrichedPlayer(pick.player);
-                  return (
-                    <div key={pick.pickNumber} className="flex items-center justify-between p-3 rounded-lg bg-slate-950/50 border border-slate-800/80">
-                      <div className="text-xs text-slate-500 font-bold w-10">R{pick.round}</div>
-                      {enriched ? (
-                        <div className="flex-1 flex justify-between items-center ml-2">
-                          <span className="font-bold text-sm text-white flex items-center gap-1.5">
-                            {enriched.name}
-                            {enriched.injury_status && (
-                              <span className={`px-1 py-[1px] rounded-[4px] text-[8px] font-black uppercase leading-none border ${['Out', 'IR', 'PUP', 'Sus', 'Suspended'].includes(enriched.injury_status) ? 'bg-red-950/80 text-red-500 border-red-500/50' :
-                                enriched.injury_status === 'Doubtful' ? 'bg-orange-950/80 text-orange-500 border-orange-500/50' :
-                                  'bg-amber-950/80 text-amber-500 border-amber-500/50'
-                                }`}>
-                                {enriched.injury_status === 'Questionable' ? 'Q' : enriched.injury_status === 'Doubtful' ? 'D' : enriched.injury_status === 'Suspended' ? 'SUS' : enriched.injury_status}
-                              </span>
-                            )}
-                            {pick.isKeeper && <span className="text-[10px] bg-amber-500/20 text-amber-500 px-1 py-0.5 rounded border border-amber-500/30">KEEPER</span>}
-                          </span>
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs text-slate-400 font-bold uppercase flex items-center gap-1">
-                              {enriched.team}
-                              {enriched.bye && <span className="text-[8px] bg-slate-800/80 px-1 py-[1px] rounded">BYE {enriched.bye}</span>}
-                            </span>
-                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${POSITION_COLORS[enriched.position]?.badge}`}>{enriched.position}</span>
-                            {isCommissioner && showCommishTools && (
-                              <button onClick={() => handleManualRemovePlayer(picks.findIndex(p => p.pickNumber === pick.pickNumber))} className="p-1.5 hover:bg-red-500/20 text-red-500 rounded-md transition ml-1">
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="flex-1 ml-2 text-sm text-slate-600 font-semibold italic">Empty</div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-        )}
-
-        <div className="flex-1 min-w-0 bg-slate-900 border border-slate-800 rounded-xl sm:rounded-2xl p-2 sm:p-4 flex flex-col h-full overflow-hidden shadow-2xl">
-
-          {/* HORIZONTAL SCROLL ENABLED HERE */}
-          <div className="flex-1 overflow-x-auto overflow-y-auto">
-
-            {/* THE SQUISH FIX: min-w-full with inline-block enables scroll on mobile but stretches cleanly to edges on TV */}
-            <div ref={boardRef} className="inline-block pb-8 min-w-full bg-slate-900 p-1 sm:p-2" style={{ minWidth: `${48 + (teams.length * 110)}px` }}>
-
-              {/* Header Row */}
-              <div
-                className="grid gap-1.5 sm:gap-2 sticky top-0 bg-slate-900 z-20 pb-2 border-b border-slate-800"
-                style={{ gridTemplateColumns: `48px repeat(${teams.length}, 1fr)` }}
-              >
-                <div className="sticky left-0 bg-slate-900 z-30 flex items-center justify-center border-r border-slate-800/50">
-                  <span className="text-[10px] font-bold text-slate-500/50">RND</span>
-                </div>
-
-                {teams.map((team) => (
-                  <button
-                    key={team.id}
-                    onClick={() => setViewingTeam(team)}
-                    className="bg-slate-950 border border-slate-800 hover:border-blue-500 hover:bg-slate-800 transition rounded-lg p-2 text-center cursor-pointer group min-h-[44px] flex items-center justify-center shadow-sm"
-                  >
-                    <div className="text-[10px] sm:text-xs font-black text-white group-hover:text-blue-400 leading-tight uppercase line-clamp-2">{team.name}</div>
-                  </button>
-                ))}
-              </div>
-
-              {/* Draft Rounds */}
-              <div className="space-y-1.5 sm:space-y-2 mt-2">
-                {Array.from({ length: totalRounds }).map((_, rIdx) => {
-                  const rNum = rIdx + 1;
-                  const roundPicks = picks.filter((p) => p.round === rNum);
-
-                  return (
-                    <div
-                      key={rNum}
-                      className="grid gap-1.5 sm:gap-2 items-stretch relative"
-                      style={{ gridTemplateColumns: `48px repeat(${teams.length}, 1fr)` }}
-                    >
-                      {/* Sticky Round Number Column */}
-                      <div className="sticky left-0 z-10 bg-slate-900/90 backdrop-blur-md flex items-center justify-center h-full min-h-[80px] sm:min-h-[90px] border border-slate-800 rounded-lg shadow-[4px_0_15px_-3px_rgba(0,0,0,0.3)]">
-                        <span className="text-sm font-black text-slate-400">{rNum}</span>
-                      </div>
-
-                      {/* Team Pick Blocks */}
-                      {teams.map((team) => {
-                        const teamPicksThisRound = roundPicks.filter((p) => p.teamId === team.id);
-
-                        if (teamPicksThisRound.length === 0) {
-                          return (
-                            <div key={`empty-${team.id}-${rNum}`} className="h-full min-h-[80px] sm:min-h-[90px] bg-slate-900/40 border border-slate-800/30 rounded-lg flex items-center justify-center">
-                            </div>
-                          );
-                        }
-
-                        return (
-                          <div key={team.id} className="flex flex-col gap-1.5 sm:gap-2 h-full">
-                            {teamPicksThisRound.map((pick) => {
-                              const pickIndex = picks.findIndex(p => p.pickNumber === pick.pickNumber);
-                              const isCurrent = pickIndex === currentPickIndex;
-                              const isSkipped = !pick.player && pickIndex < currentPickIndex;
-
-                              const enriched = getEnrichedPlayer(pick.player);
-                              const posStyle = enriched ? POSITION_COLORS[enriched.position] : null;
-                              const split = enriched ? getSplitName(enriched.name) : null;
-
-                              return (
-                                <div key={pick.pickNumber} className={`h-[80px] sm:h-[90px] rounded-lg p-1.5 sm:p-2 flex flex-col justify-between border relative shadow-sm ${isCurrent ? 'border-amber-400 bg-amber-500/10 ring-2 ring-amber-400/30 animate-pulse' : isSkipped ? 'border-red-500/50 bg-red-950/30 ring-1 ring-red-500/50' : enriched ? `${posStyle?.bg} ${posStyle?.border}` : 'bg-slate-950/50 border-slate-800/80'}`}>
-                                  {pick.isKeeper && (
-                                    <div className="absolute -top-2 -right-2 bg-amber-500 text-slate-950 text-[9px] sm:text-[10px] font-black w-4 h-4 sm:w-5 sm:h-5 flex items-center justify-center rounded-full shadow-lg">K</div>
-                                  )}
-
-                                  {/* Top Bar: Position & NFL Team / Pick # */}
-                                  <div className="flex justify-between items-center text-[9px] sm:text-[10px]">
-                                    {enriched ? (
-                                      <span className={`px-1 sm:px-1.5 py-0.5 rounded font-bold text-[8px] sm:text-[9px] ${posStyle?.badge}`}>{enriched.position}</span>
-                                    ) : (
-                                      <span className="text-slate-500 font-medium">#{pick.pickNumber}</span>
-                                    )}
-
-                                    {enriched && (
-                                      <span className="text-white/70 font-bold text-[9px] sm:text-[10px] uppercase">
-                                        {enriched.team}
-                                      </span>
-                                    )}
-                                  </div>
-
-                                  {/* First Name stacked over BOLD Last Name */}
-                                  {enriched && split ? (
-                                    <div className="my-auto text-center leading-none px-0.5">
-                                      <div className="text-[9px] sm:text-xs font-semibold text-slate-200 truncate tracking-tight mb-0.5">{split.firstName}</div>
-                                      <div className={`text-[11px] sm:text-sm font-black tracking-tight truncate uppercase leading-tight ${posStyle?.text}`}>{split.lastName}</div>
-                                    </div>
-                                  ) : (
-                                    <div className="text-[10px] sm:text-xs text-slate-700 font-semibold text-center my-auto">Empty</div>
-                                  )}
-
-                                  {/* Bottom Row - BYE WEEK */}
-                                  {enriched && (
-                                    <div className="flex justify-between items-center text-[8px] sm:text-[9px] text-white/60 font-medium border-t border-white/10 pt-1 mt-1">
-                                      <span>#{pick.pickNumber}</span>
-                                      {enriched.bye && (
-                                        <span className="text-white font-black bg-black/40 border border-white/10 px-1.5 py-[1px] rounded text-[7px] sm:text-[8px] leading-none">
-                                          BYE {enriched.bye}
-                                        </span>
-                                      )}
-                                      <span>R{pick.round}</span>
-                                    </div>
-                                  )}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
     </div>
   );
 }
